@@ -1,0 +1,548 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ADMIN CREDENTIALS:
+    // Email: admin@cobypicks.com
+    // Password: AdminCoby!
+    // This admin can delete collections and manage all data
+    
+    // Helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'participant';
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserRole() == 'admin' ||
+        isHardcodedAdmin()
+      );
+    }
+
+    function isOrganizer() {
+      return isAuthenticated() && getUserRole() == 'organizer';
+    }
+
+    function isParticipant() {
+      return isAuthenticated() && getUserRole() == 'participant';
+    }
+
+    function isOrganizerOrAdmin() {
+      return isOrganizer() || isAdmin();
+    }
+
+    function isOrganizerOrTeacher() {
+      return isOrganizer() || isAdmin();
+    }
+
+    function isHardcodedAdmin() {
+      return isAuthenticated() && 
+        request.auth.token.email == 'admin@cobypicks.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Simple admin verification - checks for hardcoded admin email and password
+    function verifyAdminWithPassword(email, password) {
+      return email == 'admin@cobypicks.com' && password == 'AdminCoby!';
+    }
+
+    // Activities Collection - More permissive for mobile app
+    match /activities/{activityId} {
+      // Allow all authenticated users to read activities (mobile app needs this)
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        isAdmin()
+      );
+
+      // Activity subcollections
+      match /{subcollection=**}/{docId} {
+        allow read, write: if isAuthenticated() && (
+          get(/databases/$(database)/documents/activities/$(activityId)).data.createdBy == request.auth.uid ||
+          isAdmin()
+        );
+      }
+    }
+
+    // Users - Enhanced security for role management with admin protection
+    match /users/{userId} {
+      // Allow authenticated users to read their own profile (even if document doesn't exist)
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Allow all authenticated users to read all user profiles (needed for active users list)
+      allow read: if isAuthenticated();
+      // Allow anonymous users to read basic profile info for cached user data
+      allow read: if request.auth == null && resource.data.get('allowAnonymousRead', false) == true;
+      
+      // ADMIN PROTECTION: Prevent deletion of hardcoded admin accounts
+      allow delete: if isAuthenticated() && 
+                     request.auth.uid == userId && 
+                     !(resource.data.get('isHardcodedAdmin', false) == true) &&
+                     !(resource.data.get('email', '') == 'admin@cobypicks.com');
+      
+      // SECURITY: Allow write for own profile BUT prevent role changes and admin protection removal
+      allow write: if isAuthenticated() && request.auth.uid == userId &&
+                   (!('role' in request.resource.data.diff(resource.data).affectedKeys()) &&
+                    !('roleLocked' in request.resource.data.diff(resource.data).affectedKeys()) &&
+                    !('roleChangedBy' in request.resource.data.diff(resource.data).affectedKeys()) &&
+                    !('roleChangeHistory' in request.resource.data.diff(resource.data).affectedKeys()) &&
+                    !('isHardcodedAdmin' in request.resource.data.diff(resource.data).affectedKeys()) &&
+                    !('canDeleteCollections' in request.resource.data.diff(resource.data).affectedKeys()));
+      
+      // Allow users to update online status and activity fields
+      allow update: if isAuthenticated() && request.auth.uid == userId &&
+                    request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(['lastActiveAt', 'isActive', 'lastActiveDevice', 'updatedAt']);
+      
+      // Allow authenticated users to create their own user document
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated();
+
+      // Admin override - only hardcoded admin can modify any user including roles
+      // But even admins cannot delete other admin accounts
+      allow read, write: if isAdmin();
+      allow delete: if isAdmin() && 
+                     !(get(/databases/$(database)/documents/users/$(userId)).data.get('isHardcodedAdmin', false) == true) &&
+                     !(get(/databases/$(database)/documents/users/$(userId)).data.get('email', '') == 'admin@cobypicks.com');
+    }
+
+    // Participants - only organizers can manage participants they created
+    match /participants/{participantId} {
+      // Participants can read their own data
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      // Organizers can read all participants they created
+      allow read: if isAuthenticated() && isOrganizer() && request.auth.uid == resource.data.userId;
+      // Admins can read all participants
+      allow read: if isAdmin();
+      // Only the creator can write to their own participants
+      allow write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      // Admins can write to any participant
+      allow write: if isAdmin();
+      // Anyone authenticated can create participants (for adding new ones)
+      allow create: if isAuthenticated();
+    }
+
+    // Wheels - Enhanced mobile app compatibility
+    match /wheels/{wheelId} {
+      // Allow all authenticated users to read wheels (mobile app needs broader access)
+      allow read: if isAuthenticated();
+      
+      // Owners can write to their own wheels - check both userId and createdBy fields
+      allow write: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        request.auth.uid == resource.data.createdBy
+      );
+      // Admins can read and write all wheels
+      allow read, write: if isAdmin();
+      
+      // Allow authenticated users to create wheels
+      allow create: if isAuthenticated();
+
+      // Subcollections
+      match /{subcollection=**}/{docId} {
+        // Owners can read and write subcollections of their wheels
+        allow read, write: if isAuthenticated() && (
+          get(/databases/$(database)/documents/wheels/$(wheelId)).data.userId == request.auth.uid ||
+          get(/databases/$(database)/documents/wheels/$(wheelId)).data.createdBy == request.auth.uid
+        );
+        // Admins can read and write all subcollections
+        allow read, write: if isAdmin();
+        // Participants can read comments and history of live wheels
+        allow read: if isParticipant() && get(/databases/$(database)/documents/wheels/$(wheelId)).data.live == true &&
+                     (subcollection == 'comments' || subcollection == 'history');
+      }
+
+      // Viewers subcollection for live sessions
+      match /viewers/{viewerId} {
+        allow read: if true;
+        allow create: if isAuthenticated() || request.auth == null;
+        allow update: if isAuthenticated() || request.auth == null;
+        allow delete: if isAuthenticated() || request.auth == null;
+      }
+    }
+
+    // Wheel Types - Allow public read for app initialization
+    match /wheelTypes/{wheelTypeId} {
+      allow read: if true; // Allow public read for app initialization and room code participants
+      allow write: if isAdmin();
+    }
+
+    // Live Draws Collection - Enhanced mobile app access
+    match /liveDraws/{liveDrawId} {
+      // Allow all authenticated users to read live draws (mobile app needs this)
+      allow read: if isAuthenticated();
+      // Allow reading active live draws even without authentication (for join codes)
+      allow read: if resource.data.isActive == true;
+      
+      allow create: if isAuthenticated();
+      // Allow all authenticated users to update live draws (mobile app compatibility)
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        isAdmin()
+      );
+    }
+
+    // Wheel Spins
+    match /wheelSpins/{spinId} {
+      allow read: if isAuthenticated();
+      allow create: if isOrganizerOrAdmin();
+      allow update: if isAuthenticated();
+      allow delete: if isOrganizerOrAdmin();
+    }
+
+    // Data Privacy Consent
+    match /dataPrivacyConsent/{consentId} {
+      allow read, write: if isAuthenticated();
+      allow read: if isAdmin();
+    }
+
+    // Sent Notifications (admin only)
+    match /sentNotifications/{notificationId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Topics/Projects
+    match /topics/{topicId} {
+      allow read, write: if isAuthenticated();
+      allow read, write: if isAdmin();
+    }
+    match /projects/{projectId} {
+      allow read, write: if isAuthenticated();
+      allow read, write: if isAdmin();
+    }
+
+    // Admin-specific collections
+    match /adminLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /systemSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // User activity tracking
+    match /userActivity/{activityId} {
+      allow create: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow create: if isAdmin();
+      allow read: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        ("readBy" in request.resource.data.diff(resource.data).affectedKeys())
+      );
+      allow delete: if isAdmin();
+    }
+
+    // App sync
+    match /appSyncData/{syncId} {
+      allow read, write: if isAuthenticated();
+      allow read, write: if isAdmin();
+    }
+
+    // Error logs
+    match /errorLogs/{errorId} {
+      allow create: if isAuthenticated();
+      allow read: if isAdmin();
+    }
+
+    // Live Draw Sessions (cross-platform web/app realtime) - MAXIMUM REAL-TIME SYNC ACCESS
+    match /liveDrawSessions/{sessionId} {
+      // MAXIMUM READ ACCESS - Allow ALL access to live sessions for real-time sync
+      // This is ESSENTIAL for participant wheels to synchronize in real-time
+      allow read: if true; // UNRESTRICTED read access for live session sync
+
+      // MAXIMUM WRITE ACCESS - Allow everyone to create and update for live sync
+      allow create: if isAuthenticated() || request.auth == null; // Any user including anonymous
+      allow update: if isAuthenticated() || request.auth == null; // Any user including anonymous
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.createdBy;
+
+      // Viewers subcollection (open reads; join while active)
+      match /viewers/{viewerId} {
+        allow read: if true;
+
+        allow create: if isAuthenticated() ||
+                       (request.auth == null &&
+                        get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.isActive == true);
+
+        allow update: if isAuthenticated() ||
+                       (request.auth == null &&
+                        get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.isActive == true);
+
+        allow delete: if isAuthenticated() && (
+          request.auth.uid == resource.data.userId ||
+          get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.createdBy == request.auth.uid ||
+          isAdmin()
+        ) ||
+        (request.auth == null &&
+         get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.isActive == true);
+      }
+
+      // Reactions subcollection
+      match /reactions/{reactionId} {
+        allow read: if true;
+
+        allow create: if isAuthenticated() ||
+                       (request.auth == null &&
+                        get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.isActive == true);
+
+        allow update, delete: if isAuthenticated() && (
+          request.auth.uid == resource.data.userId ||
+          get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.createdBy == request.auth.uid ||
+          isAdmin()
+        );
+      }
+
+      // Comments subcollection
+      match /comments/{commentId} {
+        allow read: if isAuthenticated() ||
+                     (request.auth == null &&
+                      get(/databases/$(database)/documents/liveDrawSessions/$(sessionId)).data.isActive == true);
+        allow create: if isAuthenticated();
+      }
+
+      // Organizer/Teacher presence
+      match /teacherActivity/{teacherId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isAuthenticated() && request.auth.uid == teacherId;
+      }
+
+      // Live draw data
+      match /drawData/{dataId} {
+        allow read: if isAuthenticated();
+        allow write: if isOrganizerOrAdmin();
+      }
+
+      // Spin results
+      match /spinResults/{resultId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update, delete: if isOrganizerOrAdmin();
+      }
+    }
+
+    // Real-time invitations used by NotificationContext - Enhanced access
+    match /liveInvitations/{invitationId} {
+      // All authenticated users can read invitations (mobile app needs this)
+      allow read: if isAuthenticated();
+      // Allow reading for participants who might not be fully authenticated yet
+      allow read: if request.auth != null;
+      // Emergency fallback - allow reading even without auth for active sessions
+      allow read: if true;
+      
+      // All authenticated users can create invitations
+      allow create: if isAuthenticated();
+      // All authenticated users can update invitations
+      allow update: if isAuthenticated();
+      // All authenticated users can delete invitations  
+      allow delete: if isAuthenticated();
+    }
+
+    // Real-time live room invitations for organizers (matches code using liveRoomInvitations collection)
+    match /liveRoomInvitations/{invitationId} {
+      // All authenticated users can read live room invitations (organizer collaborations)
+      allow read: if isAuthenticated();
+      // All authenticated users can create live room invitations
+      allow create: if isAuthenticated();
+      // All authenticated users can update live room invitations
+      allow update: if isAuthenticated();
+      // All authenticated users can delete live room invitations
+      allow delete: if isAuthenticated();
+    }
+
+    // Fallback invitations used by LiveRoomScreen
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.studentId ||
+        request.auth.uid == resource.data.invitedBy ||
+        isAdmin()
+      );
+      allow create: if isOrganizerOrAdmin();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.studentId ||
+        request.auth.uid == resource.data.invitedBy ||
+        isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.invitedBy || isAdmin()
+      );
+    }
+
+    // Room Code Invitations
+    match /roomCodeInvitations/{invitationId} {
+      // All authenticated users can read invitations
+      allow read: if isAuthenticated();
+      // All authenticated users can create invitations
+      allow create: if isAuthenticated();
+      // All authenticated users can update invitations
+      allow update: if isAuthenticated();
+      // All authenticated users can delete invitations
+      allow delete: if isAuthenticated();
+    }
+
+    // Draw Activities - More permissive for mobile app
+    match /drawActivities/{activityId} {
+      // Allow all authenticated users to read activities (mobile app needs this)
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        resource.data.isShared == true ||
+        resource.data.settings.isShared == true ||
+        isAdmin()
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // Participant Lists
+    match /participantLists/{listId} {
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // Draw Results
+    match /drawResults/{resultId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        resource.data.isPublic == true ||
+        isAdmin()
+      );
+      allow write: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // Privacy Consents
+    match /privacyConsents/{consentId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow read: if isAdmin();
+    }
+
+    // Wheel Presets
+    match /wheelPresets/{presetId} {
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // Spin History
+    match /spinHistory/{historyId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // LIVE WHEEL HISTORY - CRITICAL MISSING RULE!
+    match /liveWheelHistory/{historyId} {
+      // Users can read live history records they created
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+      // Any authenticated user can create live history records (for save operation)
+      allow create: if isAuthenticated();
+      // Users can update/delete their own live history records
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+    }
+
+    // Student Lists
+    match /studentLists/{listId} {
+      allow read, write: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy || isAdmin()
+      );
+      allow read: if isAdmin();
+    }
+
+    // Admin dashboard collections
+    match /adminStats/{statId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /systemMetrics/{metricId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /userAnalytics/{analyticsId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    match /activityAnalytics/{analyticsId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    match /systemHealth/{healthId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /backupData/{backupId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    match /performanceMetrics/{metricId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    // Emergency fallback rules for mobile app compatibility
+    // Allow reading essential collections for authenticated users
+    match /{collection}/{document} {
+      allow read: if isAuthenticated() && (
+        collection == 'liveDrawSessions' ||
+        collection == 'wheels' ||
+        collection == 'users' ||
+        collection == 'liveDraws' ||
+        collection == 'wheelTypes' ||
+        collection == 'liveInvitations' ||
+        collection == 'activities' ||
+        collection == 'drawActivities'
+      );
+
+      // EXCEPTION: Allow anonymous reading of ACTIVE liveDrawSessions for participant access
+      allow read: if collection == 'liveDrawSessions' &&
+                   resource.data.isActive == true &&
+                   resource.data.isLive == true;
+
+      // Admin can read everything
+      allow read: if isAdmin();
+
+      // Allow users to create and update their own documents
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        request.auth.uid == resource.data.createdBy ||
+        request.auth.uid == resource.data.ownerId
+      );
+    }
+  }
+}
