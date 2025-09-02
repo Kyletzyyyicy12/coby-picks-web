@@ -3047,7 +3047,16 @@ export function LiveDrawManager({ user, activityId, participants, onBack, onAddP
                       ]}
                     />
                   ) : (
-                    <EnhancedWheel
+                    {console.log('[LiveDrawManager] Rendering EnhancedWheel', {
+  organizerMode: session.createdBy === user.uid || isActualOrganizer,
+  isLiveMode: true,
+  sessionId: session.id,
+  participantMode,
+  userUid: user.uid,
+  sessionCreatedBy: session.createdBy,
+  isActualOrganizer
+})}
+<EnhancedWheel
                       participants={session.selectedWheelType?.defaultItems ?
                         session.selectedWheelType.defaultItems.map((item: string, index: number) => ({
                           id: `wheel-item-${index}`,
@@ -4452,3 +4461,5 @@ export function LiveDrawManagerWithProvider(props: LiveDrawManagerProps) {
 // Use LiveDrawManager when the component is already wrapped with WheelTypeProvider
 export { LiveDrawManager as LiveDrawManagerComponent }
 export default LiveDrawManagerWithProvider
+
+
