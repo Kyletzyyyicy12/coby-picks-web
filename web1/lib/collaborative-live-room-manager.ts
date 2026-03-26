@@ -1,4 +1,4 @@
-import { db } from '@/lib/firebase'
+   import { db } from '@/lib/firebase'
 import {
   doc,
   updateDoc,
@@ -19,7 +19,7 @@ interface CollaborativeAction {
   id?: string
   sessionId: string
   wheelId: string
-  action: 'start_spin' | 'end_session' | 'change_settings' | 'select_winners' | 'broadcast_message'
+  action: 'start_spin' | 'end_session' | 'change_settings' | 'select_winners' | 'broadcast_message' | 'update_images' | 'change_wheel_type'
   performedBy: string
   performedByName: string
   timestamp: any
@@ -347,6 +347,12 @@ class CollaborativeLiveRoomManager {
       case 'broadcast_message':
         await this.performBroadcastMessage(sessionId, parameters)
         break
+      case 'update_images':
+        await this.performUpdateImages(sessionId, parameters)
+        break
+      case 'change_wheel_type':
+        await this.performChangeWheelType(sessionId, parameters)
+        break
       default:
         throw new Error(`Unknown action type: ${actionType}`)
     }
@@ -438,11 +444,11 @@ class CollaborativeLiveRoomManager {
 
   private async performSelectWinners(sessionId: string, parameters: any): Promise<void> {
     const sessionRef = doc(db, 'liveDrawSessions', sessionId)
-    
+
     const winners = parameters?.winners || []
-    
+
     // Validate and clean winner data
-    const cleanWinners = winners.filter(winner => winner !== undefined && winner !== null)
+    const cleanWinners = winners.filter((winner: any) => winner !== undefined && winner !== null)
     
     const wheelStateData = {
       isSpinning: false,
@@ -462,8 +468,8 @@ class CollaborativeLiveRoomManager {
       wheelState: cleanWheelState,
       resultNotification: {
         message: cleanWinners.length === 1 
-          ? `🎉 Congratulations ${cleanWinners[0]?.name || 'Winner'}! You are the winner!`
-          : `🎉 Congratulations to our ${cleanWinners.length} winners: ${cleanWinners.map((w: any) => w?.name || 'Winner').join(', ')}!`,
+          ? `🎉 Congratulations ${cleanWinners[0]?.name || 'Winner'}! 🎉`
+          : `🎉 Congratulations to our ${cleanWinners.length} winners: ${cleanWinners.map((w: any) => w?.name || 'Winner').join(', ')}! 🎉`,
         winners: cleanWinners,
         timestamp: serverTimestamp(),
         isActive: true,
@@ -478,7 +484,7 @@ class CollaborativeLiveRoomManager {
   private async performBroadcastMessage(sessionId: string, parameters: any): Promise<void> {
     const message = parameters?.message || ''
     const sender = parameters?.senderName || 'Organizer'
-    
+
     // Add to session messages collection
     await addDoc(
       collection(db, 'liveDrawSessions', sessionId, 'messages'),
@@ -489,7 +495,7 @@ class CollaborativeLiveRoomManager {
         type: 'organizer_broadcast'
       }
     )
-    
+
     // Update session with latest broadcast
     await updateDoc(doc(db, 'liveDrawSessions', sessionId), {
       latestBroadcast: {
@@ -499,6 +505,75 @@ class CollaborativeLiveRoomManager {
       },
       lastUpdated: serverTimestamp()
     })
+  }
+
+  private async performUpdateImages(sessionId: string, parameters: any): Promise<void> {
+    const sessionRef = doc(db, 'liveDrawSessions', sessionId)
+
+    const wheelImages = parameters?.wheelImages || []
+    const imageWheelSlices = parameters?.imageWheelSlices || []
+    const hasImages = parameters?.hasImages || false
+    const imageCount = parameters?.imageCount || 0
+
+    // Validate and clean image data
+    const cleanWheelImages = wheelImages.filter((img: any) => img !== undefined && img !== null)
+    const cleanImageWheelSlices = imageWheelSlices.filter((slice: any) => slice !== undefined && slice !== null)
+
+    const wheelStateData = {
+      hasImages: hasImages,
+      imageCount: imageCount,
+      imagesApplied: hasImages,
+      imagePickerMode: hasImages,
+      lastImageUpdate: serverTimestamp(),
+      lastImageApplication: new Date().toISOString()
+    }
+
+    // Filter out any undefined values
+    const cleanWheelState = Object.fromEntries(
+      Object.entries(wheelStateData).filter(([_, value]) => value !== undefined)
+    )
+
+    const updateData = {
+      wheelImages: cleanWheelImages,
+      imageWheelSlices: cleanImageWheelSlices,
+      wheelState: cleanWheelState,
+      imageUpdateNotification: {
+        message: `🖼️ ${imageCount} image${imageCount === 1 ? '' : 's'} applied to wheel slices`,
+        imageCount: imageCount,
+        timestamp: serverTimestamp(),
+        isActive: true
+      },
+      lastUpdated: serverTimestamp()
+    }
+
+    await updateDoc(sessionRef, updateData)
+  }
+
+  private async performChangeWheelType(sessionId: string, parameters: any): Promise<void> {
+    const sessionRef = doc(db, 'liveDrawSessions', sessionId)
+
+    const wheelType = parameters?.wheelType
+    const wheelTitle = parameters?.wheelTitle
+    const wheelItems = parameters?.wheelItems || []
+
+    const updateData: any = {
+      lastUpdated: serverTimestamp()
+    }
+
+    if (wheelType) {
+      updateData.selectedWheelType = wheelType
+      updateData.wheelType = wheelType.id
+      updateData.wheelTitle = wheelTitle || wheelType.title
+      updateData.wheelItems = wheelItems
+      updateData.wheelIcon = wheelType.icon
+    }
+
+    // Filter out any undefined values
+    const cleanUpdateData = Object.fromEntries(
+      Object.entries(updateData).filter(([_, value]) => value !== undefined)
+    )
+
+    await updateDoc(sessionRef, cleanUpdateData)
   }
 
   /**

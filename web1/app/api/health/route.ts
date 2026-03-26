@@ -1,19 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET(request: NextRequest) {
-  try {
-    return NextResponse.json({
-      status: 'API is working',
-      timestamp: new Date().toISOString(),
-      message: 'Basic API functionality is operational'
-    })
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: 'API health check failed', message: error.message },
-      { status: 500 }
-    )
-  }
-}
 
 export async function POST(request: NextRequest) {
   try {

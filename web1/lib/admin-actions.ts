@@ -1,6 +1,27 @@
 import { db } from "@/lib/firebase"
 import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore"
 
+// Email sending function for user welcome emails with passwords
+// This function is now handled by the API route to avoid client-side server-only imports
+export async function sendUserWelcomeEmail(
+  userEmail: string,
+  userName: string,
+  password: string,
+  role: string,
+  adminEmail: string
+) {
+  try {
+    console.log(`📧 Welcome email will be sent by API route for ${userEmail}`)
+
+    // The actual email sending is now handled by the API route
+    // This function is kept for compatibility but the real work is done server-side
+    return { success: true, message: `Welcome email queued for ${userEmail}` }
+  } catch (error: any) {
+    console.error("Error in welcome email function:", error)
+    return { success: false, message: `Failed to queue welcome email: ${error.message}` }
+  }
+}
+
 export async function sendEmailNotification(
   recipient: string, 
   subject: string, 
@@ -8,7 +29,7 @@ export async function sendEmailNotification(
   adminUser?: any,
   options?: {
     duration?: number; // Duration in days
-    priority?: "low" |  "urgent";
+    priority?: "low" | "medium" | "urgent";
     type?: "info" | "warning" | "success" | "urgent";
   }
 ) {

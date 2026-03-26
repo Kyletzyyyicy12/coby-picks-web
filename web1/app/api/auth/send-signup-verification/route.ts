@@ -12,14 +12,14 @@ export async function POST(request: NextRequest) {
     console.log('📧 Signup verification API called');
     
     const body = await request.json()
-    const { email, fullName } = body
+    const { email, firstName, lastName } = body
 
-    console.log('📝 Request data:', { email: email ? 'provided' : 'missing', fullName: fullName ? 'provided' : 'missing' });
+    console.log('📝 Request data:', { email: email ? 'provided' : 'missing', firstName: firstName ? 'provided' : 'missing', lastName: lastName ? 'provided' : 'missing' });
 
-    if (!email || !fullName) {
-      console.log('❌ Missing required fields:', { email: !!email, fullName: !!fullName });
+    if (!email || !firstName || !lastName) {
+      console.log('❌ Missing required fields:', { email: !!email, firstName: !!firstName, lastName: !!lastName });
       return NextResponse.json(
-        { error: 'Email and full name are required' }, 
+        { error: 'Email, first name, and last name are required' },
         { status: 400 }
       )
     }
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     console.log('📧 Sending verification email...');
     // Send verification email
-    const emailResult = await sendVerificationEmail(emailLower, verificationCode, 'signup', fullName)
+    const emailResult = await sendVerificationEmail(emailLower, verificationCode, 'signup', `${firstName.trim()} ${lastName.trim()}`)
     
     if (!emailResult.success) {
       console.error('❌ Email sending failed:', emailResult.error);

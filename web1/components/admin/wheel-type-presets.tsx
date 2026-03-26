@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
 import { collection, addDoc, serverTimestamp, getDocs, query, where, onSnapshot, orderBy } from "firebase/firestore"
-import { Plus, Sparkles, Users, UserCheck, Target } from "lucide-react"
+import { Plus, Sparkles, Users, UserCheck, Target, CheckSquare, Square } from "lucide-react"
 
 interface WheelTypePreset {
   value: string
@@ -127,7 +127,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: true,
-      congratsMessage: "🏆 Congratulations, {winner}! You've earned this reward!"
+      congratsMessage: "Congratulations, {winner}! You've earned this reward!"
     }
   },
 
@@ -156,6 +156,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: false,
     canBeShared: true,
+    defaultItems: ["High Priority", "Medium Priority", "Low Priority", "Urgent", "Can Wait"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -163,6 +164,22 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
   },
 
   // Games & Fun
+  {
+    value: "team-picker",
+    label: "Team Picker Wheel",
+    description: "Randomly assign participants to teams for group activities and games",
+    category: "Games",
+    icon: "👥",
+    allowedRoles: ["organizer", "participant"],
+    isActivityWheel: true,
+    canBeShared: true,
+    defaultItems: ["Team Alpha", "Team Beta", "Team Gamma", "Team Delta", "Team Echo", "Team Foxtrot"],
+    defaultSettings: {
+      allowRealTimeCollection: true,
+      requiresApproval: false,
+      congratsMessage: "Welcome to {winner}! 🎉"
+    }
+  },
   {
     value: "truth-dare",
     label: "Truth or Dare",
@@ -172,6 +189,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Truth", "Dare", "Truth", "Dare", "Truth", "Dare"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: true
@@ -186,6 +204,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Option A", "Option B", "Option A", "Option B", "Option A", "Option B"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -200,6 +219,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Dance Challenge", "Singing Challenge", "Funny Face Challenge", "Animal Impression", "Magic Trick", "Talent Show"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: true
@@ -216,6 +236,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Addition", "Subtraction", "Multiplication", "Division", "Fractions", "Decimals"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -230,6 +251,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Volcano Eruption", "Baking Soda Rocket", "Invisible Ink", "Crystal Growing", "Elephant Toothpaste", "Balloon Rocket"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: true
@@ -244,6 +266,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Write about your favorite memory", "Describe your dream vacation", "What would you do with superpowers?", "Write a letter to your future self", "Describe your perfect day", "What makes you happy?"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -260,6 +283,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Holiday Baking", "Decorating Contest", "Secret Santa", "Holiday Movie Night", "Gift Wrapping Station", "Holiday Card Making"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -274,6 +298,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Zoo Visit", "Museum Tour", "Aquarium Adventure", "Farm Visit", "Science Center", "Historical Site"],
     defaultSettings: {
       allowRealTimeCollection: true,
       maxParticipants: 200,
@@ -291,6 +316,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Level A - Beginning Reader", "Level B - Early Reader", "Level C - Developing Reader", "Level D - Fluent Reader", "Level E - Advanced Reader", "Level F - Expert Reader"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -305,6 +331,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Student 1", "Student 2", "Student 3", "Student 4", "Student 5", "Student 6", "Student 7", "Student 8", "Student 9", "Student 10"],
     defaultSettings: {
       allowRealTimeCollection: true,
       maxParticipants: 30,
@@ -320,6 +347,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Reading Station", "Math Station", "Science Station", "Writing Station", "Art Station", "Computer Station"],
     defaultSettings: {
       allowRealTimeCollection: true,
       maxParticipants: 40,
@@ -337,6 +365,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["High Five Greeting", "Secret Handshake", "Elbow Bump", "Fist Bump", "Wave Hello", "Smile and Nod"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -351,6 +380,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Jumping Jacks", "Arm Circles", "March in Place", "Reach for the Stars", "Toe Touches", "Shoulder Rolls"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -365,6 +395,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: false,
+    defaultItems: ["Line Leader", "Door Holder", "Pencil Sharpener", "Paper Passer", "Calendar Helper", "Weather Reporter"],
     defaultSettings: {
       allowRealTimeCollection: false,
       maxParticipants: 30,
@@ -382,6 +413,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: false,
     canBeShared: true,
+    defaultItems: ["Apple Slices", "Carrot Sticks", "Grape Tomatoes", "Cheese Cubes", "Yogurt Cups", "Trail Mix"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: true
@@ -396,6 +428,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: false,
     canBeShared: true,
+    defaultItems: ["Classical Music", "Jazz", "Instrumental", "Nature Sounds", "Upbeat Pop", "Soft Piano"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -410,6 +443,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: false,
+    defaultItems: ["Front Row Center", "Front Row Left", "Front Row Right", "Middle Row Center", "Middle Row Left", "Middle Row Right", "Back Row Center", "Back Row Left", "Back Row Right"],
     defaultSettings: {
       allowRealTimeCollection: false,
       maxParticipants: 35,
@@ -427,6 +461,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Animals", "Sports", "Movies", "Food", "Professions", "Emotions"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -441,6 +476,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Logic Puzzles", "Word Riddles", "Math Brain Teasers", "Visual Puzzles", "Lateral Thinking", "Pattern Recognition"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -455,6 +491,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer", "participant"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["History", "Science", "Geography", "Literature", "Sports", "Entertainment"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -471,6 +508,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Watercolor Painting", "Charcoal Drawing", "Clay Sculpting", "Digital Art", "Collage Making", "Printmaking"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -485,6 +523,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Ancient Civilizations", "Middle Ages", "Renaissance", "Industrial Revolution", "World War Era", "Modern History"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -499,6 +538,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Mountains", "Rivers", "Oceans", "Deserts", "Forests", "Cities"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -513,6 +553,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Soccer", "Basketball", "Tennis", "Swimming", "Running", "Yoga"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -527,6 +568,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Basic Words", "Intermediate Words", "Advanced Words", "Synonyms", "Antonyms", "Context Clues"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -543,6 +585,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Basic Algorithms", "Data Structures", "Web Development", "Game Programming", "Mobile Apps", "AI & Machine Learning"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -557,6 +600,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Interactive Whiteboard", "Educational Apps", "Online Learning Platforms", "Virtual Reality", "Coding Software", "Digital Assessment Tools"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: true
@@ -573,6 +617,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Happy", "Sad", "Excited", "Worried", "Angry", "Calm"],
     defaultSettings: {
       allowRealTimeCollection: true,
       requiresApproval: false
@@ -587,6 +632,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Help a classmate", "Write a thank you note", "Share something nice", "Hold the door open", "Give a compliment", "Help with cleanup"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -603,6 +649,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Crazy Hair Day", "Wear School Colors", "Twin Day", "Hat Day", " Pajama Day", "Superhero Day"],
     defaultSettings: {
       allowRealTimeCollection: true,
       maxParticipants: 500,
@@ -618,6 +665,7 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     allowedRoles: ["organizer"],
     isActivityWheel: true,
     canBeShared: true,
+    defaultItems: ["Doctor", "Teacher", "Engineer", "Artist", "Scientist", "Entrepreneur"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -650,6 +698,21 @@ const WHEEL_TYPE_PRESETS: WheelTypePreset[] = [
     isActivityWheel: false,
     canBeShared: true,
     defaultItems: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    defaultSettings: {
+      allowRealTimeCollection: false,
+      requiresApproval: false
+    }
+  },
+  {
+    value: "letter-picker",
+    label: "Letter Picker Wheel",
+    description: "Pick random letters for games, spelling, or decisions",
+    category: "Picker Wheels",
+    icon: "🔤",
+    allowedRoles: ["organizer", "participant"],
+    isActivityWheel: false,
+    canBeShared: true,
+    defaultItems: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],
     defaultSettings: {
       allowRealTimeCollection: false,
       requiresApproval: false
@@ -786,22 +849,40 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
   const [addingPreset, setAddingPreset] = useState<string | null>(null)
   const [selectedPreset, setSelectedPreset] = useState<WheelTypePreset | null>(null)
   const [targetSelectionOpen, setTargetSelectionOpen] = useState(false)
+  const [multipleTargetSelectionOpen, setMultipleTargetSelectionOpen] = useState(false)
   const [distributionTarget, setDistributionTarget] = useState<"all" | "participants" | "organizers" | "specific">("all")
   const [specificUserEmails, setSpecificUserEmails] = useState("")
   const [customMessage, setCustomMessage] = useState("")
   const [existingWheelTypes, setExistingWheelTypes] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedPresets, setSelectedPresets] = useState<Set<string>>(new Set())
 
-  const addPresetToDatabase = async (preset: WheelTypePreset) => {
-    setAddingPreset(preset.value)
+  const addPresetToDatabase = async (preset: WheelTypePreset, isMultiple = false, distTarget?: string, specificEmails?: string) => {
+    if (!isMultiple) {
+      setAddingPreset(preset.value)
+    }
     try {
+      // Determine allowed roles based on distribution target
+      let allowedRoles = preset.allowedRoles
+      if (distTarget === "all") {
+        // For "All Users", include only organizers and participants (exclude admin)
+        allowedRoles = ["organizer", "participant"]
+      } else if (distTarget === "participants") {
+        // For "Participants Only", only allow participants
+        allowedRoles = ["participant"]
+      } else if (distTarget === "organizers") {
+        // For "Organizers Only", only allow organizers
+        allowedRoles = ["organizer"]
+      }
+      // For "specific", keep original roles but handle via user-specific entries
+
       const docRef = await addDoc(collection(db, "wheelTypes"), {
         value: preset.value,
         label: preset.label,
         description: preset.description,
         enabled: true,
         order: Date.now(), // Use timestamp for order
-        allowedRoles: preset.allowedRoles,
+        allowedRoles: allowedRoles,
         isActivityWheel: preset.isActivityWheel,
         canBeShared: preset.canBeShared,
         defaultItems: preset.defaultItems || ["Option 1", "Option 2", "Option 3", "Option 4"],
@@ -810,7 +891,9 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
         updatedAt: serverTimestamp(),
         isPreset: true,
         category: preset.category,
-        icon: preset.icon
+        icon: preset.icon,
+        distributionTarget: distTarget || "all",
+        specificUsers: distTarget === "specific" && specificEmails ? specificEmails.split(",").map(email => email.trim()).filter(Boolean) : []
       })
 
       // Broadcast the change to all users
@@ -835,6 +918,49 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
       console.error("Error adding preset:", error)
       toast({
         title: "Error Adding Wheel Type",
+        description: error.message,
+        variant: "destructive"
+      })
+    } finally {
+      if (!isMultiple) {
+        setAddingPreset(null)
+      }
+    }
+  }
+
+  const togglePresetSelection = (presetValue: string) => {
+    const newSelected = new Set(selectedPresets)
+    if (newSelected.has(presetValue)) {
+      newSelected.delete(presetValue)
+    } else {
+      newSelected.add(presetValue)
+    }
+    setSelectedPresets(newSelected)
+  }
+
+  const addMultiplePresets = async () => {
+    if (selectedPresets.size === 0) return
+
+    const selectedPresetObjects = WHEEL_TYPE_PRESETS.filter(preset =>
+      selectedPresets.has(preset.value)
+    )
+
+    setAddingPreset("multiple")
+    try {
+      // Add all selected presets
+      for (const preset of selectedPresetObjects) {
+        await addPresetToDatabase(preset, true, distributionTarget, specificUserEmails)
+      }
+
+      setSelectedPresets(new Set())
+      toast({
+        title: "✨ Multiple Wheel Types Added!",
+        description: `${selectedPresetObjects.length} wheel types have been added and are now available.`,
+      })
+    } catch (error: any) {
+      console.error("Error adding multiple presets:", error)
+      toast({
+        title: "Error Adding Wheel Types",
         description: error.message,
         variant: "destructive"
       })
@@ -882,16 +1008,31 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
       </DialogTrigger>
       <DialogContent className="max-w-4xl max-h-[80vh]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
-            Wheel Type Presets
-          </DialogTitle>
-          <DialogDescription>
-            Choose from pre-configured wheel types designed for different educational and activity needs.
-          </DialogDescription>
-        </DialogHeader>
-        
-        <div className="h-[60vh] overflow-y-auto pr-4">
+           <DialogTitle className="flex items-center gap-2">
+             <Sparkles className="h-5 w-5" />
+             Wheel Type Presets
+           </DialogTitle>
+           <DialogDescription>
+             Choose from pre-configured wheel types designed for different educational and activity needs. Select multiple presets to add them all at once.
+           </DialogDescription>
+         </DialogHeader>
+
+         {/* Add Selected Button - positioned better */}
+         {selectedPresets.size > 0 && (
+           <div className="flex justify-center mb-4">
+             <Button
+               onClick={() => setMultipleTargetSelectionOpen(true)}
+               disabled={addingPreset !== null}
+               className="bg-swu-red hover:bg-swu-red/90 text-white"
+               size="sm"
+             >
+               <Plus className="h-4 w-4 mr-2" />
+               Add Selected ({selectedPresets.size})
+             </Button>
+           </div>
+         )}
+
+         <div className="h-[60vh] overflow-y-auto pr-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
@@ -913,9 +1054,19 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
                   <h3 className="text-lg font-semibold mb-3 text-swu-red">{category}</h3>
                   <div className="grid gap-3 md:grid-cols-2">
                     {presets.map((preset) => (
-                    <Card key={preset.value} className="hover:shadow-md transition-shadow">
+                    <Card key={preset.value} className={`hover:shadow-md transition-shadow ${selectedPresets.has(preset.value) ? 'ring-2 ring-swu-red' : ''}`}>
                       <CardHeader className="pb-3">
                         <CardTitle className="text-sm flex items-center gap-2">
+                          <button
+                            onClick={() => togglePresetSelection(preset.value)}
+                            className="mr-2 p-1 rounded hover:bg-gray-100 transition-colors"
+                          >
+                            {selectedPresets.has(preset.value) ? (
+                              <CheckSquare className="h-4 w-4 text-swu-red" />
+                            ) : (
+                              <Square className="h-4 w-4 text-gray-400" />
+                            )}
+                          </button>
                           <span className="text-lg">{preset.icon}</span>
                           {preset.label}
                         </CardTitle>
@@ -937,24 +1088,28 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
                             <Badge variant="secondary" className="text-xs">Shareable</Badge>
                           )}
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setSelectedPreset(preset)
-                            setTargetSelectionOpen(true)
-                          }}
-                          disabled={addingPreset === preset.value}
-                          className="w-full"
-                        >
-                          {addingPreset === preset.value ? (
-                            "Adding..."
-                          ) : (
-                            <>
-                              <Plus className="h-3 w-3 mr-1" />
-                              Add This Type
-                            </>
+                        <div className="flex gap-2">
+                          {selectedPresets.size === 0 && (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setSelectedPreset(preset)
+                                setTargetSelectionOpen(true)
+                              }}
+                              disabled={addingPreset === preset.value}
+                              className="flex-1"
+                            >
+                              {addingPreset === preset.value ? (
+                                "Adding..."
+                              ) : (
+                                <>
+                                  <Plus className="h-3 w-3 mr-1" />
+                                  Add Now
+                                </>
+                              )}
+                            </Button>
                           )}
-                        </Button>
+                        </div>
                       </CardContent>
                     </Card>
                     ))}
@@ -1063,6 +1218,103 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Multiple Target Selection Dialog */}
+      <Dialog open={multipleTargetSelectionOpen} onOpenChange={setMultipleTargetSelectionOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Target className="h-5 w-5" />
+              Choose Distribution Target for Multiple Presets
+            </DialogTitle>
+            <DialogDescription>
+              Select who should receive the {selectedPresets.size} selected wheel types.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <RadioGroup value={distributionTarget} onValueChange={(value) => setDistributionTarget(value as "all" | "participants" | "organizers" | "specific")}>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="all" id="all-multi" />
+                <Label htmlFor="all-multi" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  All Users
+                  <Badge variant="outline">Default</Badge>
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="participants" id="participants-multi" />
+                <Label htmlFor="participants-multi" className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Participants Only
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="organizers" id="organizers-multi" />
+                <Label htmlFor="organizers-multi" className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Organizers Only
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="specific" id="specific-multi" />
+                <Label htmlFor="specific-multi" className="flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  Specific Users
+                </Label>
+              </div>
+            </RadioGroup>
+
+            {distributionTarget === "specific" && (
+              <div className="space-y-2">
+                <Label htmlFor="user-emails-multi">User Emails (comma-separated)</Label>
+                <Textarea
+                  id="user-emails-multi"
+                  value={specificUserEmails}
+                  onChange={(e) => setSpecificUserEmails(e.target.value)}
+                  placeholder="user1@example.com, user2@example.com"
+                  rows={3}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Enter email addresses of users who should receive these wheel types.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="custom-message-multi">Custom Notification Message (Optional)</Label>
+              <Input
+                id="custom-message-multi"
+                value={customMessage}
+                onChange={(e) => setCustomMessage(e.target.value)}
+                placeholder="New wheel types are now available!"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setMultipleTargetSelectionOpen(false)
+                setDistributionTarget("all")
+                setSpecificUserEmails("")
+                setCustomMessage("")
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddMultiplePresetsWithTarget}
+              disabled={addingPreset !== null || (distributionTarget === "specific" && !specificUserEmails.trim())}
+              className="bg-swu-red hover:bg-swu-red/90 text-white"
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              Add {selectedPresets.size} Wheel Types
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 
@@ -1071,6 +1323,20 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
 
     setAddingPreset(selectedPreset.value)
     try {
+      // Determine allowed roles based on distribution target
+      let allowedRoles = selectedPreset.allowedRoles
+      if (distributionTarget === "all") {
+        // For "All Users", include only organizers and participants (exclude admin)
+        allowedRoles = ["organizer", "participant"]
+      } else if (distributionTarget === "participants") {
+        // For "Participants Only", only allow participants
+        allowedRoles = ["participant"]
+      } else if (distributionTarget === "organizers") {
+        // For "Organizers Only", only allow organizers
+        allowedRoles = ["organizer"]
+      }
+      // For "specific", keep original roles but handle via user-specific entries
+
       // Add the wheel type to the global collection
       const docRef = await addDoc(collection(db, "wheelTypes"), {
         value: selectedPreset.value,
@@ -1078,7 +1344,7 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
         description: selectedPreset.description,
         enabled: true,
         order: Date.now(),
-        allowedRoles: selectedPreset.allowedRoles,
+        allowedRoles: allowedRoles,
         isActivityWheel: selectedPreset.isActivityWheel,
         canBeShared: selectedPreset.canBeShared,
         defaultItems: selectedPreset.defaultItems || ["Option 1", "Option 2", "Option 3", "Option 4"],
@@ -1104,7 +1370,7 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
           message: customMessage || `New wheel type "${selectedPreset.label}" is now available!`,
           createdAt: serverTimestamp(),
           isActive: true,
-          targetRoles: ["admin", "organizer", "participant"],
+          targetRoles: ["organizer", "participant"],
           priority: "normal"
         })
       } else {
@@ -1211,6 +1477,94 @@ export function WheelTypePresets({ onPresetAdded }: WheelTypePresetsProps) {
       console.error("Error adding preset with target:", error)
       toast({
         title: "Error Adding Wheel Type",
+        description: error.message,
+        variant: "destructive"
+      })
+    } finally {
+      setAddingPreset(null)
+    }
+  }
+
+  async function handleAddMultiplePresetsWithTarget() {
+    if (selectedPresets.size === 0) return
+
+    const selectedPresetObjects = WHEEL_TYPE_PRESETS.filter(preset =>
+      selectedPresets.has(preset.value)
+    )
+
+    setAddingPreset("multiple")
+    try {
+      // Add all selected presets with the chosen distribution target
+      for (const preset of selectedPresetObjects) {
+        await addPresetToDatabase(preset, true, distributionTarget, specificUserEmails)
+      }
+
+      // Handle different distribution targets for notifications
+      let targetUsers: string[] = []
+
+      if (distributionTarget === "all") {
+        // Global distribution - notify all users
+        await addDoc(collection(db, "systemNotifications"), {
+          type: "wheelTypeAdded",
+          wheelTypeLabel: `${selectedPresetObjects.length} wheel types`,
+          message: customMessage || `${selectedPresetObjects.length} new wheel types are now available!`,
+          createdAt: serverTimestamp(),
+          isActive: true,
+          targetRoles: ["organizer", "participant"],
+          priority: "normal"
+        })
+      } else {
+        // Targeted distribution
+        if (distributionTarget === "participants" || distributionTarget === "organizers") {
+          // Query users by role
+          const usersQuery = query(
+            collection(db, "users"),
+            where("role", "==", distributionTarget === "participants" ? "participant" : "organizer")
+          )
+          const usersSnapshot = await getDocs(usersQuery)
+          targetUsers = usersSnapshot.docs.map(doc => doc.data().email || doc.data().uid)
+        } else if (distributionTarget === "specific") {
+          targetUsers = specificUserEmails.split(",").map(email => email.trim()).filter(Boolean)
+        }
+
+        // Create notifications for each user
+        const batch = []
+        for (const userIdentifier of targetUsers) {
+          batch.push(
+            addDoc(collection(db, "systemNotifications"), {
+              type: "wheelTypeAdded",
+              wheelTypeLabel: `${selectedPresetObjects.length} wheel types`,
+              message: customMessage || `${selectedPresetObjects.length} new wheel types have been added to your wheel types!`,
+              createdAt: serverTimestamp(),
+              isActive: true,
+              targetUser: userIdentifier,
+              targetRoles: distributionTarget === "participants" ? ["participant"] : ["organizer"],
+              priority: "normal",
+              distributionMethod: distributionTarget
+            })
+          )
+        }
+
+        // Execute all batch operations
+        await Promise.all(batch)
+      }
+
+      toast({
+        title: "✨ Multiple Wheel Types Added & Activated!",
+        description: `${selectedPresetObjects.length} wheel types have been distributed to ${distributionTarget === "all" ? "all users" : distributionTarget === "specific" ? `${targetUsers.length} specific users` : distributionTarget} and are now visible in both solo and live wheel galleries.`,
+      })
+
+      // Reset form
+      setMultipleTargetSelectionOpen(false)
+      setDistributionTarget("all")
+      setSpecificUserEmails("")
+      setCustomMessage("")
+      setSelectedPresets(new Set())
+      onPresetAdded?.()
+    } catch (error: any) {
+      console.error("Error adding multiple presets with target:", error)
+      toast({
+        title: "Error Adding Wheel Types",
         description: error.message,
         variant: "destructive"
       })

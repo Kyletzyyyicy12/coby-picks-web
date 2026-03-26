@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -37,48 +37,64 @@ interface EnhancedWinnerPopupProps {
     secondary: string
     accent: string
   } // Theme information from wheel
+  imageSize?: "sm" | "md" | "lg" | "xl" // Custom image size
 }
 
 export function EnhancedWinnerPopup({
   isOpen,
   onClose,
   winners,
-  congratsMessage = "🏆  Congratulations! You are the winner! 🎉 🏆",
-  customWinnerMessage = "🏆 🎊 Congratulations! 🎊 🏆",
-  customWinnerWord = "Winner",
-  wheelType = "regular",
-  showConfetti = true,
-  autoClose = 10, // Default auto-close after 10 seconds
-  customTitle,
-  theme
+  congratsMessage,
+   customWinnerMessage = "",
+    customWinnerWord = "Selected",
+   wheelType = "regular",
+   showConfetti = true,
+   autoClose = 10, // Default auto-close after 10 seconds
+   customTitle,
+   theme,
+   imageSize = "md" // Default to medium size
 }: EnhancedWinnerPopupProps) {
+  // Default congrats message based on wheel type
+  const defaultCongratsMessage = wheelType === "image-picker"
+    ? "🎉 Amazing! {name} has been selected! 🎉"
+    : "🎉 Congratulations! 🎉"
+
+  // Use provided congratsMessage or computed default
+  const actualCongratsMessage = congratsMessage || defaultCongratsMessage
+
   const [animationPhase, setAnimationPhase] = useState<"enter" | "celebrate" | "display">("enter")
   const [displayedWinners, setDisplayedWinners] = useState<Winner[]>([])
   // 🔄 SINGLE-CONFETTI FIX: Track previously celebrated winners to prevent duplicate celebrations
-  const [celebratedWinnerIds, setCelebratedWinnerIds] = useState<Set<string>>(new Set())
+  const celebratedWinnerIdsRef = useRef<Set<string>>(new Set())
 
   // Trigger confetti and animations when popup opens - SINGLE CELEBRATION ONLY
   useEffect(() => {
     if (isOpen && winners.length > 0) {
+      // 🔧 FIX: Ensure all winners have unique IDs for React keys (moved inside useEffect to prevent infinite loop)
+      const winnersWithUniqueIds = winners.map((winner, index) => ({
+        ...winner,
+        id: winner.id || `winner-${index}-${Date.now()}`
+      }))
+
       setAnimationPhase("enter")
 
       // 🔄 SINGLE-CONFETTI FIX: Check if we already celebrated any of these winners
-      const currentWinnerIds = new Set(winners.map(w => w.id))
-      const hasUncelebratedWinners = Array.from(currentWinnerIds).some(id => !celebratedWinnerIds.has(id))
+      const currentWinnerIds = new Set(winnersWithUniqueIds.map(w => w.id))
+      const hasUncelebratedWinners = Array.from(currentWinnerIds).some(id => !celebratedWinnerIdsRef.current.has(id))
 
-      console.log('🎯 WINNER POPUP: Checking for duplicate celebrations', {
-        currentWinners: winners.map(w => `${w.name}(${w.id})`),
-        celebratedWinnerIds: Array.from(celebratedWinnerIds),
-        hasUncelebratedWinners: hasUncelebratedWinners,
+      console.log('Checking for duplicate celebrations', {
+        currentSelected: winnersWithUniqueIds.map(w => `${w.name}(${w.id})`),
+        celebratedSelectedIds: Array.from(celebratedWinnerIdsRef.current),
+        hasUncelebratedSelected: hasUncelebratedWinners,
         willTriggerConfetti: hasUncelebratedWinners && showConfetti
       })
 
       // Show confetti only if we have uncelebrated winners and confetti is enabled
       if (showConfetti && hasUncelebratedWinners) {
         // Mark these winners as celebrated
-        setCelebratedWinnerIds(prev => new Set([...prev, ...currentWinnerIds]))
+        currentWinnerIds.forEach(id => celebratedWinnerIdsRef.current.add(id))
 
-        console.log('🎉 CONFETTI TRIGGERED - Single celebration confirmed for new winners')
+        console.log('Confetti triggered for new selected')
 
         // Single coordinated burst - less intense
         confetti({
@@ -113,28 +129,32 @@ export function EnhancedWinnerPopup({
         setTimeout(() => clearInterval(sparkleInterval), 2000) // Shorter duration
 
       } else if (showConfetti && !hasUncelebratedWinners) {
-        console.log('🎯 PARTICIPANT: Skipping confetti - all winners already celebrated')
+        console.log('Skipping confetti - all selected already celebrated')
       }
 
       // Always run animation sequence regardless of confetti
-      setTimeout(() => setAnimationPhase("celebrate"), 800)
-      setTimeout(() => {
-        setAnimationPhase("display")
-        setDisplayedWinners(winners)
-      }, 1500)
+       setTimeout(() => setAnimationPhase("celebrate"), 800)
+       setTimeout(() => {
+         setAnimationPhase("display")
+         setDisplayedWinners(winnersWithUniqueIds)
+       }, 1500)
 
-      // Auto close if specified
-    if (autoClose) {
-      setTimeout(() => onClose(), autoClose * 1000)
-    }
+      // Auto close if specified - use a ref to avoid dependency issues
+      if (autoClose) {
+        const timer = setTimeout(() => {
+          onClose()
+        }, autoClose * 1000)
+
+        return () => clearTimeout(timer)
+      }
   }
-}, [isOpen, winners, showConfetti, autoClose, onClose, celebratedWinnerIds])
+ }, [isOpen, winners, showConfetti, autoClose]) // Removed celebratedWinnerIds and onClose
 
 // 🔄 SINGLE-CONFETTI FIX: Reset celebrated winners when popup closes
 useEffect(() => {
   if (!isOpen) {
-    console.log('🧹 resetting celebrated winners when popup closes')
-    setCelebratedWinnerIds(new Set())
+    console.log('Resetting celebrated selected when popup closes')
+    celebratedWinnerIdsRef.current.clear()
     setAnimationPhase("enter")
     setDisplayedWinners([])
   }
@@ -168,7 +188,7 @@ useEffect(() => {
             `}
             style={{
               background: isImagePicker
-                ? "linear-gradient(135deg, #9333ea, #ec4899, #dc2626)"
+                ? `linear-gradient(135deg, #8e0b16, #66181E, #8e0b16)` // Maroon theme for image picker
                 : theme
                 ? `linear-gradient(135deg, ${theme.primary}, ${theme.secondary}, ${theme.primary})`
                 : "linear-gradient(135deg, #f59e0b, #f97316, #dc2626)"
@@ -176,16 +196,21 @@ useEffect(() => {
           >
             {/* Floating Icons Animation */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              {[Trophy, Crown, Star, Medal, Award, PartyPopper].map((Icon, index) => (
-                <Icon
-                  key={index}
+              {[
+                { Icon: Crown, name: 'crown', id: 'crown-1' },
+                { Icon: Star, name: 'star', id: 'star-1' },
+                { Icon: Medal, name: 'medal', id: 'medal-1' },
+                { Icon: Award, name: 'award', id: 'award-1' }
+              ].map((item, index) => (
+                <item.Icon
+                  key={item.id}
                   className={`
                     absolute text-white/20 animate-bounce
                     ${index % 2 === 0 ? "animate-pulse" : "animate-ping"}
                   `}
                   style={{
-                    left: `${10 + (index * 15)}%`,
-                    top: `${5 + (index * 8)}%`,
+                    left: `${10 + (index * 20)}%`,
+                    top: `${5 + (index * 10)}%`,
                     fontSize: `${20 + (index * 4)}px`,
                     animationDelay: `${index * 200}ms`,
                     animationDuration: `${2000 + (index * 300)}ms`
@@ -196,27 +221,26 @@ useEffect(() => {
 
             {/* Header */}
             <div className="relative z-10 text-center py-8 px-6">
-              <div 
+              <div
                 className={`
                   ${animationPhase === "celebrate" ? "animate-bounce" : ""}
                   transition-all duration-500
                 `}
               >
-                <div className="text-8xl mb-4 filter drop-shadow-lg">
-                  {isImagePicker ? "🖼️" : isMultipleWinners ? "👥" : "🏆"}
+                <div className={`mb-4 filter drop-shadow-lg ${!isImagePicker ? 'text-8xl' : 'text-6xl'}`}>
+                  {!isMultipleWinners && displayedWinners[0] ?
+                    (isImagePicker ? '' : displayedWinners[0].name)
+                    : ""}
                 </div>
-                
-                <h1 className="text-4xl md:text-6xl font-black text-white mb-2 drop-shadow-lg">
-                  {customTitle || (isMultipleWinners ? `🏆  ${customWinnerWord.toUpperCase()}S! 🎉 🏆` : `🏆 🎉 ${customWinnerWord.toUpperCase()}! 🎉 🏆`)}
-                </h1>
 
-                <div className="flex justify-center items-center gap-2 mb-4">
-                  <Sparkles className="text-yellow-300 animate-spin" size={24} />
-                  <p className="text-xl md:text-2xl text-white font-bold drop-shadow">
-                    {isMultipleWinners ? `${winners.length} ` : ""}
-                  </p>
-                  <Sparkles className="text-yellow-300 animate-spin" size={24} />
-                </div>
+
+                {customWinnerMessage && !isImagePicker && (
+                  <div className="flex justify-center items-center gap-2 mb-4">
+                    <p className="text-xl md:text-2xl text-white font-bold drop-shadow">
+                      {customWinnerMessage.replace('{word}', customWinnerWord).replace('{name}', displayedWinners.map(w => w.name).join(', '))}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -241,88 +265,54 @@ useEffect(() => {
                       animationDuration: "600ms"
                     }}
                   >
-                    <CardContent className="p-6 text-center space-y-4">
-                      {/* Winner Rank Badge */}
-                      <div className="flex justify-center">
-                        <Badge
-                          className={`
-                            text-white text-lg px-4 py-2 font-bold shadow-lg animate-pulse
-                          `}
-                          style={{
-                            background: isImagePicker
-                              ? "linear-gradient(90deg, #9333ea, #ec4899)"
-                              : theme
-                              ? `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})`
-                              : "linear-gradient(90deg, #f59e0b, #f97316)"
-                          }}
-                        >
-                          <Crown className="h-5 w-5 mr-2" />
-                          #{index + 1} Winner
-                        </Badge>
-                      </div>
-
+                    <CardContent className="p-4 text-center space-y-4">
                       {/* Winner Image or Avatar */}
                       <div className="flex justify-center">
                         {winner.image?.url ? (
                           <div className="relative">
-                            <img
-                              src={winner.image.url}
-                              alt={winner.image.alt || winner.name}
-                              className={`
-                                w-32 h-32 object-cover rounded-full 
-                                border-6 shadow-xl
-                                ${isImagePicker ? "border-purple-400" : "border-yellow-400"}
-                                animate-pulse
-                              `}
-                            />
-                            <div className="absolute -top-2 -right-2">
-                              <div className="bg-yellow-400 rounded-full p-2 animate-spin">
-                                <Trophy className="h-6 w-6 text-yellow-900" />
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div 
+                            {(() => {
+                              // Determine image size based on imageSize prop - make even bigger for winner announcement
+                              let sizeClasses = "w-48 h-48" // default (md) - increased for winner announcement
+                              if (imageSize === "sm") sizeClasses = "w-40 h-40"
+                              else if (imageSize === "lg") sizeClasses = "w-64 h-64" // increased for winner announcement
+                              else if (imageSize === "xl") sizeClasses = "w-72 h-72" // increased for winner announcement
+
+                              return (
+                                <img
+                                  src={winner.image.url}
+                                  alt={winner.image.alt || winner.name}
+                                  className={`
+                                    ${sizeClasses} object-cover
+                                    border-6 shadow-xl
+                                    ${isImagePicker ? "border-purple-400" : "border-yellow-400"}
+                                    animate-pulse
+                                  `}
+                                  onError={(e) => { e.currentTarget.src = '/placeholder.jpg'; }}
+                                />
+                              )
+                            })()}
+                         </div>
+                       ) : (
+                          <div
                             className={`
-                              w-32 h-32 rounded-full border-6 shadow-xl
-                              flex items-center justify-center text-5xl font-bold text-white
+                              w-40 h-40 rounded-full border-6 shadow-xl flex items-center justify-center text-5xl font-bold text-white
                               ${isImagePicker ? "border-purple-400" : "border-yellow-400"}
                               animate-pulse
                             `}
                             style={{ backgroundColor: winner.color || "#3B82F6" }}
                           >
-                            {isImagePicker ? "🖼️" : "🏆"}
+                            {isImagePicker ? "" : (winner.name.charAt(0).toUpperCase() || "W")}
                           </div>
                         )}
                       </div>
 
-                      {/* Winner Details */}
+                      {/* Winner Details - Simplified */}
                       <div className="space-y-2">
-                        <h3 className={`
-                          text-2xl font-black
-                          ${isImagePicker ? "text-purple-800" : "text-gray-800"}
-                        `}>
-                          {winner.name}
-                        </h3>
-                        
-                        {winner.email && (
-                          <p className="text-sm text-gray-600 font-medium">
-                            📧 {winner.email}
-                          </p>
+                        {!isImagePicker && (
+                          <div className="text-xl font-bold text-gray-800">
+                            {winner.name}
+                          </div>
                         )}
-                        
-                        {winner.contactNumber && (
-                          <p className="text-sm text-gray-600 font-medium">
-                            📱 {winner.contactNumber}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Celebration Icons */}
-                      <div className="flex justify-center gap-2">
-                        <Zap className="text-yellow-500 animate-bounce" size={20} />
-                        <Star className="text-yellow-500 animate-pulse" size={20} />
-                        <Medal className="text-yellow-500 animate-bounce" size={20} />
                       </div>
                     </CardContent>
                   </Card>
@@ -331,56 +321,19 @@ useEffect(() => {
             </div>
 
             {/* Congratulations Message */}
-            <div className="relative z-10 bg-white/90 backdrop-blur-sm mx-6 mb-6 rounded-2xl p-6 border-4 border-yellow-300">
-              <div className="text-center">
-                <h2 className={`
-                  text-2xl font-bold mb-3
-                  ${isImagePicker ? "text-purple-800" : "text-gray-800"}
-                `}>
-                  {customWinnerMessage.replace('{word}', customWinnerWord)}
-                </h2>
-                <p className="text-lg text-gray-700 leading-relaxed">
-                  {congratsMessage.replace('{name}', winners.map(w => w.name).join(', '))}
-                </p>
+            {!isImagePicker && (
+              <div className="relative z-10 bg-white/90 backdrop-blur-sm mx-6 mb-6 rounded-2xl p-6 border-4 border-yellow-300">
+                <div className="text-center">
+                  <h2 className="text-2xl font-bold mb-3 text-gray-800">
+                    {customWinnerMessage.replace('{word}', customWinnerWord).replace('{name}', displayedWinners.map(w => w.name).join(', '))}
+                  </h2>
+                  <p className="text-lg text-gray-700 leading-relaxed">
+                    {actualCongratsMessage.replace('{name}', displayedWinners.map(w => w.name).join(', ')).replace('{word}', customWinnerWord.toLowerCase())}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Action Buttons */}
-            <div className="relative z-10 flex justify-center gap-4 pb-8 px-6">
-              <Button
-                onClick={onClose}
-                size="lg"
-                className={`
-                  text-white font-bold px-8 py-3 text-lg rounded-xl shadow-lg
-                  ${isImagePicker 
-                    ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700" 
-                    : "bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700"
-                  }
-                  transform hover:scale-105 transition-all duration-200
-                `}
-              >
-                Awesome!
-              </Button>
-              
-              {showConfetti && (
-                <Button
-                  onClick={() => {
-                    confetti({
-                      particleCount: 50, // Reduced from 200
-                      spread: 60, // Reduced from 100
-                      origin: { y: 0.7 },
-                      colors: ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1']
-                    })
-                  }}
-                  variant="outline"
-                  size="lg"
-                  className="border-2 border-yellow-400 text-yellow-700 hover:bg-yellow-50 font-bold px-6 py-3 text-lg rounded-xl"
-                >
-                  <Sparkles className="h-5 w-5 mr-2" />
-                  More Celebration!
-                </Button>
-              )}
-            </div>
           </div>
         </div>
       </DialogContent>

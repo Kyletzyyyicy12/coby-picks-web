@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableCaption } from "@/components/ui/table"
+import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -15,12 +17,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, serverTimestamp } from "firebase/firestore"
 import { Plus, Edit, Trash2, Loader2, ArrowUp, ArrowDown } from "lucide-react"
 import { WheelTypePresets } from "./wheel-type-presets"
+
 
 interface WheelTypeConfig {
   id: string
@@ -38,6 +40,7 @@ interface WheelTypeConfig {
     requiresApproval: boolean
     congratsMessage?: string
   }
+  defaultItems?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -47,10 +50,9 @@ export function WheelTypeManager() {
   const [loading, setLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [newTypeValue, setNewTypeValue] = useState("")
   const [newTypeLabel, setNewTypeLabel] = useState("")
   const [newTypeDescription, setNewTypeDescription] = useState("")
-  const [newAllowedRoles, setNewAllowedRoles] = useState<string[]>(["organizer"])
+  const [newAllowedRoles, setNewAllowedRoles] = useState<string[]>(["organizer", "participant"])
   const [newIsActivityWheel, setNewIsActivityWheel] = useState(true)
   const [newCanBeShared, setNewCanBeShared] = useState(true)
   const [newAllowRealTimeCollection, setNewAllowRealTimeCollection] = useState(true)
@@ -59,6 +61,12 @@ export function WheelTypeManager() {
   const [newCongratsMessage, setNewCongratsMessage] = useState("Congratulations, {winner}!")
   const [editingType, setEditingType] = useState<WheelTypeConfig | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // Bulk delete states
+  const [selectedWheelTypes, setSelectedWheelTypes] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [showWheelTypeCheckboxes, setShowWheelTypeCheckboxes] = useState(false)
+
 
   const setupRealTimeListener = useCallback(() => {
     setLoading(true)
@@ -74,9 +82,10 @@ export function WheelTypeManager() {
           description: doc.data().description,
           enabled: doc.data().enabled,
           order: doc.data().order,
-          allowedRoles: doc.data().allowedRoles || ["organizer"],
+          allowedRoles: doc.data().allowedRoles || ["organizer", "participant"],
           isActivityWheel: doc.data().isActivityWheel || false,
           canBeShared: doc.data().canBeShared || false,
+          defaultItems: doc.data().defaultItems || ["Option 1", "Option 2", "Option 3"],
           defaultSettings: doc.data().defaultSettings || {
             allowRealTimeCollection: false,
             requiresApproval: false,
@@ -114,18 +123,61 @@ export function WheelTypeManager() {
   }, [])
 
   const handleAddWheelType = async () => {
-    if (!newTypeValue || !newTypeLabel || !newTypeDescription) {
+    console.log("handleAddWheelType called")
+    alert("Function started")
+
+    if (!newTypeLabel) {
+      console.log("Validation failed: missing label")
+      alert("Validation failed: missing label")
       toast({
         title: "Missing Information",
-        description: "Please fill in all fields.",
+        description: "Please fill in the label field.",
         variant: "destructive",
       })
       return
     }
-    if (wheelTypes.some((type) => type.value === newTypeValue)) {
+
+    // Validate allowed roles
+    if (newAllowedRoles.length === 0) {
+      console.log("Validation failed: no allowed roles selected")
+      toast({
+        title: "Missing Allowed Roles",
+        description: "Please select at least one role that can use this wheel type.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Validation for wheel items (manual input only)
+    if (!newTypeDescription.trim()) {
+      console.log("Validation failed: missing description")
+      toast({
+        title: "Missing Wheel Items",
+        description: "Please enter items for the wheel in the description field.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const finalItems = newTypeDescription.split(',').map(item => item.trim()).filter(item => item.length > 0)
+
+    if (finalItems.length === 0) {
+      console.log("Validation failed: no items parsed from description")
+      toast({
+        title: "No Items",
+        description: "Please add at least one item to the wheel.",
+        variant: "destructive",
+      })
+      return
+    }
+    // Generate internal value and check for duplicates
+    const generatedValue = newTypeLabel.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+    console.log("Generated value:", generatedValue)
+    if (wheelTypes.some((type) => type.value === generatedValue)) {
+      console.log("Validation failed: duplicate value")
       toast({
         title: "Duplicate Value",
-        description: "A wheel type with this value already exists.",
+        description: "A wheel type with this name already exists.",
         variant: "destructive",
       })
       return
@@ -133,11 +185,24 @@ export function WheelTypeManager() {
 
     setSaving(true)
     try {
+      console.log("About to add wheel type to Firestore")
       const newOrder = wheelTypes.length > 0 ? Math.max(...wheelTypes.map((t) => t.order)) + 1 : 1
+
+      // Build defaultSettings object conditionally to avoid undefined values
+      const defaultSettings: any = {
+        allowRealTimeCollection: newAllowRealTimeCollection,
+        requiresApproval: newRequiresApproval,
+        congratsMessage: newCongratsMessage
+      }
+
+      // Only include maxParticipants if it has a value (not undefined)
+      if (newMaxParticipants !== undefined) {
+        defaultSettings.maxParticipants = newMaxParticipants
+      }
 
       // Add the new wheel type
       const docRef = await addDoc(collection(db, "wheelTypes"), {
-        value: newTypeValue,
+        value: generatedValue,
         label: newTypeLabel,
         description: newTypeDescription,
         enabled: true, // New types are enabled by default
@@ -145,12 +210,8 @@ export function WheelTypeManager() {
         allowedRoles: newAllowedRoles,
         isActivityWheel: newIsActivityWheel,
         canBeShared: newCanBeShared,
-        defaultSettings: {
-          allowRealTimeCollection: newAllowRealTimeCollection,
-          maxParticipants: newMaxParticipants,
-          requiresApproval: newRequiresApproval,
-          congratsMessage: newCongratsMessage
-        },
+        defaultItems: finalItems,
+        defaultSettings: defaultSettings,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
@@ -166,14 +227,14 @@ export function WheelTypeManager() {
         targetRoles: newAllowedRoles,
         priority: "normal"
       })
+      console.log("Wheel type added successfully")
       toast({
         title: "Wheel Type Added",
         description: `"${newTypeLabel}" has been added.`,
       })
-      setNewTypeValue("")
       setNewTypeLabel("")
       setNewTypeDescription("")
-      setNewAllowedRoles(["organizer"])
+      setNewAllowedRoles(["organizer", "participant"])
       setNewIsActivityWheel(true)
       setNewCanBeShared(true)
       setNewAllowRealTimeCollection(true)
@@ -183,6 +244,7 @@ export function WheelTypeManager() {
       setIsAddDialogOpen(false)
       // Real-time listener will automatically update the list
     } catch (error: any) {
+      console.error("Error adding wheel type:", error)
       toast({
         title: "Error Adding Wheel Type",
         description: error.message,
@@ -207,6 +269,19 @@ export function WheelTypeManager() {
     setSaving(true)
     try {
       const typeRef = doc(db, "wheelTypes", editingType.id)
+
+      // Build defaultSettings object conditionally to avoid undefined values
+      const defaultSettings: any = {
+        allowRealTimeCollection: editingType.defaultSettings.allowRealTimeCollection,
+        requiresApproval: editingType.defaultSettings.requiresApproval,
+        congratsMessage: editingType.defaultSettings.congratsMessage
+      }
+
+      // Only include maxParticipants if it has a value (not undefined)
+      if (editingType.defaultSettings.maxParticipants !== undefined) {
+        defaultSettings.maxParticipants = editingType.defaultSettings.maxParticipants
+      }
+
       await updateDoc(typeRef, {
         value: editingType.value,
         label: editingType.label,
@@ -216,7 +291,7 @@ export function WheelTypeManager() {
         allowedRoles: editingType.allowedRoles,
         isActivityWheel: editingType.isActivityWheel,
         canBeShared: editingType.canBeShared,
-        defaultSettings: editingType.defaultSettings,
+        defaultSettings: defaultSettings,
         updatedAt: new Date(),
       })
       toast({
@@ -256,6 +331,106 @@ export function WheelTypeManager() {
         variant: "destructive",
       })
     }
+  }
+
+  // Bulk delete handler for multiple wheel types
+  const handleBulkDeleteWheelTypes = async () => {
+    if (selectedWheelTypes.size === 0) {
+      toast({
+        title: "No Wheel Types Selected",
+        description: "Please select wheel types to delete.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const selectedTypesArray = Array.from(selectedWheelTypes)
+    const selectedTypeLabels = selectedTypesArray.map(id =>
+      wheelTypes.find(type => type.id === id)?.label || "Unknown"
+    ).join(", ")
+
+    const confirmMessage = `Are you sure you want to permanently delete ${selectedTypesArray.length} wheel type(s): ${selectedTypeLabels}? This action cannot be undone.`
+
+    if (!confirm(confirmMessage)) {
+      console.log(`🛑 Bulk wheel type deletion cancelled`)
+      return
+    }
+
+    setIsBulkDeleting(true)
+    let successCount = 0
+    let errorCount = 0
+
+    try {
+      for (const typeId of selectedTypesArray) {
+        const wheelType = wheelTypes.find(type => type.id === typeId)
+        if (!wheelType) continue
+
+        try {
+          await deleteDoc(doc(db, "wheelTypes", typeId))
+          console.log(`✅ Successfully deleted wheel type: ${wheelType.label}`)
+          successCount++
+        } catch (error: any) {
+          console.error(`❌ Error deleting wheel type ${wheelType.label}:`, error)
+          errorCount++
+        }
+      }
+
+      // Clear selection
+      setSelectedWheelTypes(new Set())
+
+      // Show results
+      if (successCount > 0) {
+        toast({
+          title: "Bulk Delete Completed",
+          description: `Successfully deleted ${successCount} wheel type(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}.`,
+        })
+      } else {
+        toast({
+          title: "Bulk Delete Failed",
+          description: `Failed to delete any wheel types. Check the console for details.`,
+          variant: "destructive",
+        })
+      }
+    } catch (error: any) {
+      console.error("Error in bulk delete:", error)
+      toast({
+        title: "Bulk Delete Error",
+        description: error.message || "An unexpected error occurred during bulk delete.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
+  // Handle select all checkbox
+  const handleSelectAllWheelTypes = (checked: boolean) => {
+    if (checked) {
+      const allTypeIds = new Set(wheelTypes.map(type => type.id))
+      setSelectedWheelTypes(allTypeIds)
+    } else {
+      setSelectedWheelTypes(new Set())
+    }
+  }
+
+  // Handle individual wheel type selection
+  const handleSelectWheelType = (typeId: string, checked: boolean) => {
+    const newSelected = new Set(selectedWheelTypes)
+    if (checked) {
+      newSelected.add(typeId)
+    } else {
+      newSelected.delete(typeId)
+    }
+    setSelectedWheelTypes(newSelected)
+  }
+
+  // Toggle wheel type selection mode
+  const toggleWheelTypeSelectMode = () => {
+    if (showWheelTypeCheckboxes) {
+      // Exiting select mode, clear selections
+      setSelectedWheelTypes(new Set())
+    }
+    setShowWheelTypeCheckboxes(!showWheelTypeCheckboxes)
   }
 
   const handleToggleEnabled = async (type: WheelTypeConfig) => {
@@ -323,6 +498,27 @@ export function WheelTypeManager() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            onClick={toggleWheelTypeSelectMode}
+            variant={showWheelTypeCheckboxes ? "default" : "outline"}
+            size="sm"
+          >
+            {showWheelTypeCheckboxes ? "Cancel" : "Select items"}
+          </Button>
+          {selectedWheelTypes.size > 0 && (
+            <Button
+              onClick={handleBulkDeleteWheelTypes}
+              disabled={isBulkDeleting}
+              variant="destructive"
+              size="sm"
+            >
+              {isBulkDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </Button>
+          )}
           <WheelTypePresets onPresetAdded={() => {
             // Real-time listener will automatically update the list
             toast({
@@ -332,151 +528,127 @@ export function WheelTypeManager() {
           }} />
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" className="gap-1 bg-swu-red hover:bg-swu-red/90 text-white">
+              <Button
+                size="sm"
+                className="gap-1 bg-swu-red hover:bg-swu-red/90 text-white"
+              >
                 <Plus className="h-4 w-4" />
                 Add Custom Type
               </Button>
             </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle className="text-swu-red">Add New Wheel Type</DialogTitle>
-              <DialogDescription>Define a new type of wheel for users to create.</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="new-type-value">Internal Value (e.g., "participant")</Label>
-                <Input
-                  id="new-type-value"
-                  value={newTypeValue}
-                  onChange={(e) => setNewTypeValue(e.target.value)}
-                  placeholder="Unique identifier (no spaces)"
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="new-type-label">Display Label (e.g., "Participant Picker Wheel")</Label>
-                <Input
-                  id="new-type-label"
-                  value={newTypeLabel}
-                  onChange={(e) => setNewTypeLabel(e.target.value)}
-                  placeholder="User-friendly name"
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="new-type-description">Description</Label>
-                <Textarea
-                  id="new-type-description"
-                  value={newTypeDescription}
-                  onChange={(e) => setNewTypeDescription(e.target.value)}
-                  placeholder="A brief explanation of this wheel type"
-                  rows={3}
-                  required
-                />
-              </div>
+            <DialogContent className="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="text-swu-red">Add New Wheel Type</DialogTitle>
+                <DialogDescription>
+                  Create a custom wheel type with your own items and settings.
+                </DialogDescription>
+              </DialogHeader>
 
-              <div className="grid gap-2">
-                <Label>Allowed Roles</Label>
-                <div className="flex flex-wrap gap-2">
-                  {["organizer", "participant"].map((role) => (
-                    <div key={role} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`new-role-${role}`}
-                        checked={newAllowedRoles.includes(role)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setNewAllowedRoles([...newAllowedRoles, role])
-                          } else {
-                            setNewAllowedRoles(newAllowedRoles.filter(r => r !== role))
-                          }
-                        }}
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="new-type-label">Display Label *</Label>
+                  <Input
+                    id="new-type-label"
+                    value={newTypeLabel}
+                    onChange={(e) => {
+                      console.log("Label changed to:", e.target.value)
+                      setNewTypeLabel(e.target.value)
+                    }}
+                    placeholder="User-friendly name"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="new-type-description">Wheel Items *</Label>
+                  <Textarea
+                    id="new-type-description"
+                    value={newTypeDescription}
+                    onChange={(e) => {
+                      console.log("Description changed to:", e.target.value)
+                      setNewTypeDescription(e.target.value)
+                    }}
+                    placeholder="Enter items separated by commas (e.g., Apple, Banana, Orange)"
+                    rows={3}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Required: Enter at least one item for the wheel
+                  </p>
+                </div>
+
+
+
+                <div className="grid gap-2">
+                  <Label>Allowed Roles *</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {["organizer", "participant"].map((role) => (
+                      <div key={role} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`new-role-${role}`}
+                          checked={newAllowedRoles.includes(role)}
+                          onChange={(e) => {
+                            console.log(`Checkbox ${role} changed:`, e.target.checked)
+                            if (e.target.checked) {
+                              setNewAllowedRoles([...newAllowedRoles, role])
+                            } else {
+                              setNewAllowedRoles(newAllowedRoles.filter(r => r !== role))
+                            }
+                          }}
+                        />
+                        <Label htmlFor={`new-role-${role}`} className="capitalize">{role}</Label>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Required: Select at least one role that can use this wheel type
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    Current roles: {newAllowedRoles.join(', ') || 'none selected'}
+                  </p>
+                </div>
+
+                {/* Advanced Settings */}
+                <div className="grid gap-2">
+                  <Label className="text-base font-semibold text-swu-red">Advanced Settings</Label>
+                  <div className="grid gap-3 p-3 border rounded-lg bg-gray-50">
+                    <div className="grid gap-2">
+                      <Label htmlFor="new-congrats-message">Ending Message</Label>
+                      <Textarea
+                        id="new-congrats-message"
+                        value={newCongratsMessage}
+                        onChange={(e) => setNewCongratsMessage(e.target.value)}
+                        placeholder="Congratulations, {winner}!"
+                        rows={2}
                       />
-                      <Label htmlFor={`new-role-${role}`} className="capitalize">{role}</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Use {'{winner}'} as placeholder for the selected participant's name
+                      </p>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label>Activity Wheel Settings</Label>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="new-is-activity-wheel"
-                    checked={newIsActivityWheel}
-                    onCheckedChange={setNewIsActivityWheel}
-                  />
-                  <Label htmlFor="new-is-activity-wheel">Is Activity Wheel</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="new-can-be-shared"
-                    checked={newCanBeShared}
-                    onCheckedChange={setNewCanBeShared}
-                  />
-                  <Label htmlFor="new-can-be-shared">Can Be Shared in Real-time</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="new-allow-real-time-collection"
-                    checked={newAllowRealTimeCollection}
-                    onCheckedChange={setNewAllowRealTimeCollection}
-                  />
-                  <Label htmlFor="new-allow-real-time-collection">Allow Real-time Collection</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="new-requires-approval"
-                    checked={newRequiresApproval}
-                    onCheckedChange={setNewRequiresApproval}
-                  />
-                  <Label htmlFor="new-requires-approval">Requires Approval</Label>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="new-max-participants">Max Participants (optional)</Label>
-                <Input
-                  id="new-max-participants"
-                  type="number"
-                  value={newMaxParticipants || ""}
-                  onChange={(e) => setNewMaxParticipants(e.target.value ? parseInt(e.target.value) : undefined)}
-                  placeholder="Leave empty for unlimited"
-                />
-              </div>
-
-              {/* Advanced Settings */}
-              <div className="grid gap-2">
-                <Label className="text-base font-semibold text-swu-red">Advanced Settings</Label>
-                <div className="grid gap-3 p-3 border rounded-lg bg-gray-50">
-                  <div className="grid gap-2">
-                    <Label htmlFor="new-congrats-message">Congratulations Message</Label>
-                    <Textarea
-                      id="new-congrats-message"
-                      value={newCongratsMessage}
-                      onChange={(e) => setNewCongratsMessage(e.target.value)}
-                      placeholder="Congratulations, {winner}!"
-                      rows={2}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Use {'{winner}'} as placeholder for the selected participant's name
-                    </p>
                   </div>
                 </div>
               </div>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={handleAddWheelType}
-                disabled={saving}
-                className="bg-swu-red hover:bg-swu-red/90 text-white"
-              >
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {saving ? "Adding..." : "Add Wheel Type"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsAddDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    console.log("Add Wheel Type button clicked")
+                    alert("Button clicked - attempting to add wheel type")
+                    handleAddWheelType()
+                  }}
+                  disabled={saving}
+                  className="bg-swu-red hover:bg-swu-red/90 text-white"
+                >
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  {saving ? "Adding..." : "Add Wheel Type"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -490,9 +662,18 @@ export function WheelTypeManager() {
       ) : (
         <div className="border border-gray-200 rounded-md overflow-hidden">
           <Table>
-            <TableCaption>A list of available wheel types.</TableCaption>
+            <TableCaption>A list of available wheel types. Use checkboxes to select multiple wheel types for bulk deletion.</TableCaption>
             <TableHeader className="bg-gray-50">
               <TableRow>
+                {showWheelTypeCheckboxes && (
+                  <TableHead className="w-[50px]">
+                    <Checkbox
+                      checked={selectedWheelTypes.size === wheelTypes.length && wheelTypes.length > 0}
+                      onCheckedChange={handleSelectAllWheelTypes}
+                      aria-label="Select all wheel types"
+                    />
+                  </TableHead>
+                )}
                 <TableHead className="w-[50px]">Order</TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead>Value</TableHead>
@@ -506,6 +687,15 @@ export function WheelTypeManager() {
             <TableBody>
               {wheelTypes.map((type, index) => (
                 <TableRow key={type.id}>
+                  {showWheelTypeCheckboxes && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedWheelTypes.has(type.id)}
+                        onCheckedChange={(checked) => handleSelectWheelType(type.id, checked as boolean)}
+                        aria-label={`Select ${type.label}`}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-medium">{type.order}</TableCell>
                   <TableCell>{type.label}</TableCell>
                   <TableCell className="font-mono text-sm text-muted-foreground">{type.value}</TableCell>
@@ -572,7 +762,7 @@ export function WheelTypeManager() {
                           <span className="sr-only">Edit Type</span>
                         </Button>
                       </DialogTrigger>
-                      <DialogContent className="sm:max-w-[425px]">
+                      <DialogContent className="sm:max-w-[500px] md:max-w-[600px] lg:max-w-[700px] max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                           <DialogTitle className="text-swu-red">Edit Wheel Type: {editingType?.label}</DialogTitle>
                           <DialogDescription>Update the properties of this wheel type.</DialogDescription>
@@ -585,7 +775,6 @@ export function WheelTypeManager() {
                                 id="edit-type-value"
                                 value={editingType.value}
                                 onChange={(e) => setEditingType({ ...editingType, value: e.target.value })}
-                                required
                                 disabled // Value should not be changed after creation
                               />
                             </div>
@@ -595,7 +784,6 @@ export function WheelTypeManager() {
                                 id="edit-type-label"
                                 value={editingType.label}
                                 onChange={(e) => setEditingType({ ...editingType, label: e.target.value })}
-                                required
                               />
                             </div>
                             <div className="grid gap-2">
@@ -605,132 +793,10 @@ export function WheelTypeManager() {
                                 value={editingType.description}
                                 onChange={(e) => setEditingType({ ...editingType, description: e.target.value })}
                                 rows={3}
-                                required
                               />
                             </div>
 
-                            <div className="grid gap-2">
-                              <Label>Allowed Roles</Label>
-                              <div className="flex flex-wrap gap-2">
-                                {["organizer", "participant"].map((role) => (
-                                  <div key={role} className="flex items-center space-x-2">
-                                    <input
-                                      type="checkbox"
-                                      id={`edit-role-${role}`}
-                                      checked={editingType.allowedRoles.includes(role)}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setEditingType({
-                                            ...editingType,
-                                            allowedRoles: [...editingType.allowedRoles, role]
-                                          })
-                                        } else {
-                                          setEditingType({
-                                            ...editingType,
-                                            allowedRoles: editingType.allowedRoles.filter(r => r !== role)
-                                          })
-                                        }
-                                      }}
-                                    />
-                                    <Label htmlFor={`edit-role-${role}`} className="capitalize">{role}</Label>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
 
-                            <div className="grid gap-2">
-                              <Label>Activity Wheel Settings</Label>
-                              <div className="flex items-center space-x-2">
-                                <Switch
-                                  id="edit-is-activity-wheel"
-                                  checked={editingType.isActivityWheel}
-                                  onCheckedChange={(checked) => setEditingType({ ...editingType, isActivityWheel: checked })}
-                                />
-                                <Label htmlFor="edit-is-activity-wheel">Is Activity Wheel</Label>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <Switch
-                                  id="edit-can-be-shared"
-                                  checked={editingType.canBeShared}
-                                  onCheckedChange={(checked) => setEditingType({ ...editingType, canBeShared: checked })}
-                                />
-                                <Label htmlFor="edit-can-be-shared">Can Be Shared in Real-time</Label>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <Switch
-                                  id="edit-allow-real-time-collection"
-                                  checked={editingType.defaultSettings.allowRealTimeCollection}
-                                  onCheckedChange={(checked) => setEditingType({
-                                    ...editingType,
-                                    defaultSettings: { ...editingType.defaultSettings, allowRealTimeCollection: checked }
-                                  })}
-                                />
-                                <Label htmlFor="edit-allow-real-time-collection">Allow Real-time Collection</Label>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <Switch
-                                  id="edit-requires-approval"
-                                  checked={editingType.defaultSettings.requiresApproval}
-                                  onCheckedChange={(checked) => setEditingType({
-                                    ...editingType,
-                                    defaultSettings: { ...editingType.defaultSettings, requiresApproval: checked }
-                                  })}
-                                />
-                                <Label htmlFor="edit-requires-approval">Requires Approval</Label>
-                              </div>
-                            </div>
-
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-max-participants">Max Participants (optional)</Label>
-                              <Input
-                                id="edit-max-participants"
-                                type="number"
-                                value={editingType.defaultSettings.maxParticipants || ""}
-                                onChange={(e) => setEditingType({
-                                  ...editingType,
-                                  defaultSettings: {
-                                    ...editingType.defaultSettings,
-                                    maxParticipants: e.target.value ? parseInt(e.target.value) : undefined
-                                  }
-                                })}
-                                placeholder="Leave empty for unlimited"
-                              />
-                            </div>
-
-                            {/* Advanced Settings */}
-                            <div className="grid gap-2">
-                              <Label className="text-base font-semibold text-swu-red">Advanced Settings</Label>
-                              <div className="grid gap-3 p-3 border rounded-lg bg-gray-50">
-                                <div className="grid gap-2">
-                                  <Label htmlFor="edit-congrats-message">Congratulations Message</Label>
-                                  <Textarea
-                                    id="edit-congrats-message"
-                                    value={editingType.defaultSettings.congratsMessage || "Congratulations, {winner}!"}
-                                    onChange={(e) => setEditingType({
-                                      ...editingType,
-                                      defaultSettings: {
-                                        ...editingType.defaultSettings,
-                                        congratsMessage: e.target.value
-                                      }
-                                    })}
-                                    placeholder="Congratulations, {winner}!"
-                                    rows={2}
-                                  />
-                                  <p className="text-xs text-muted-foreground">
-                                    Use {'{winner}'} as placeholder for the selected participant's name
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center space-x-2">
-                              <Switch
-                                id="edit-type-enabled"
-                                checked={editingType.enabled}
-                                onCheckedChange={(checked) => setEditingType({ ...editingType, enabled: checked })}
-                              />
-                              <Label htmlFor="edit-type-enabled">Enabled for Users</Label>
-                            </div>
                           </div>
                         )}
                         <DialogFooter>

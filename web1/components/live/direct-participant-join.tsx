@@ -112,11 +112,11 @@ export function DirectParticipantJoin({ onJoinSuccess }: DirectJoinProps) {
         lastSeen: serverTimestamp(),
         platform: 'web',
         connectionId: viewerId,
-        userAgent: navigator.userAgent,
+        userAgent: (typeof navigator !== 'undefined' && navigator?.userAgent) || 'Unknown',
         sessionId: sessionId,
         isOnline: true,
         lastActivity: serverTimestamp(),
-        participantType: 'student'
+        role: 'participant'
       }
 
       await setDoc(doc(db, "liveDrawSessions", sessionId, "viewers", viewerId), viewerData)

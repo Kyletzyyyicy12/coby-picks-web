@@ -85,6 +85,7 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isSheetOpen, setIsSheetOpen] = useState(false)
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false)
+  const [shownAnnouncementIds, setShownAnnouncementIds] = useState<Set<string>>(new Set())
 
   const fetchAnnouncements = useCallback(async () => {
     try {
@@ -171,8 +172,10 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
       // Filter for user role and expired announcements - include system notifications
       const userAnnouncements = combined.filter(announcement => {
         const roleMatch = announcement.targetRoles.includes(userRole) || 
+                         announcement.targetRoles.includes('participant') ||
+                         announcement.targetRoles.includes('student') ||
                          (announcement.isSystemNotification && 
-                          (userRole === 'organizer' || userRole === 'participant'))
+                          (userRole === 'organizer' || userRole === 'participant' || userRole === 'student'))
         return roleMatch && userRole !== 'admin'
       })
 
@@ -221,11 +224,23 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
       setUnreadCount(unread.length)
       
       // Auto-show modal for unread announcements on first load (prefer urgent; otherwise first unread)
+      // Only show if not already shown before
       if (announcements.length === 0 && unread.length > 0) {
-        const urgentUnread = unread.filter(a => a.priority === "urgent" || a.type === "urgent" || a.isSystemNotification)
-        const firstToShow = urgentUnread[0] || unread[0]
-        setSelectedAnnouncement(firstToShow)
-        setShowModal(true)
+        const urgentUnread = unread.filter(a => 
+          (a.priority === "urgent" || a.type === "urgent" || a.isSystemNotification) &&
+          !shownAnnouncementIds.has(a.id)
+        )
+        const otherUnread = unread.filter(a => !shownAnnouncementIds.has(a.id))
+        const firstToShow = urgentUnread[0] || otherUnread[0]
+        
+        if (firstToShow) {
+          setSelectedAnnouncement(firstToShow)
+          setShowModal(true)
+          // Mark this announcement as shown
+          setShownAnnouncementIds(prev => new Set([...prev, firstToShow.id]))
+          // Immediately mark as read when auto-shown
+          markAsRead(firstToShow)
+        }
       }
       
       return updated
@@ -253,7 +268,7 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
         readBy: arrayUnion({
           userId: user.uid,
           userName: user.displayName || user.email || "Unknown",
-          readAt: serverTimestamp()
+          readAt: new Date()
         })
       })
     } catch (error) {
@@ -324,6 +339,29 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
     return !announcement.readBy.some(reader => reader.userId === user.uid)
   }
 
+  const clearAllAnnouncements = async () => {
+    try {
+      // Mark all unread announcements as read
+      const unreadAnnouncements = announcements.filter(a => isUnread(a))
+      
+      await Promise.all(
+        unreadAnnouncements.map(announcement => markAsRead(announcement))
+      )
+
+      toast({
+        title: "✅ All Cleared",
+        description: `Marked ${unreadAnnouncements.length} announcement${unreadAnnouncements.length === 1 ? '' : 's'} as read`,
+      })
+    } catch (error) {
+      console.error("Error clearing announcements:", error)
+      toast({
+        title: "Error",
+        description: "Failed to clear announcements. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
   if (announcements.length === 0) {
     return null
   }
@@ -342,75 +380,111 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
             <Bell className="h-4 w-4" />
             {unreadCount > 0 && (
               <Badge 
-                className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center bg-red-500 text-white text-xs"
+                className="absolute -top-2 -right-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-white text-xs"
+                style={{ backgroundColor: '#8e0b16' }}
               >
                 {unreadCount > 9 ? "9+" : unreadCount}
               </Badge>
             )}
             {hasNewAnnouncements && (
-              <div className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full animate-pulse" />
+              <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full animate-pulse" style={{ backgroundColor: '#8e0b16' }} />
             )}
           </Button>
         </SheetTrigger>
-        <SheetContent className="w-[400px] sm:w-[540px]">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <Bell className="h-5 w-5" />
-              Announcements
+        <SheetContent className="w-[400px] sm:w-[540px]" style={{ backgroundColor: '#f8f9fa' }}>
+          <SheetHeader className="border-b pb-4 -mx-6 px-6 -mt-6 pt-6" style={{ backgroundColor: '#8e0b16' }}>
+            <SheetTitle className="flex items-center gap-3 text-lg">
+              <div className="p-2 rounded-lg" style={{ backgroundColor: 'rgba(255, 255, 255, 0.15)' }}>
+                <Bell className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-white">Announcements</span>
+                  {unreadCount > 0 && (
+                    <Badge className="text-xs px-2 py-0.5" style={{ backgroundColor: '#66181E', color: 'white' }}>
+                      {unreadCount} New
+                    </Badge>
+                  )}
+                </div>
+              </div>
               {unreadCount > 0 && (
-                <Badge className="bg-red-500 text-white">
-                  {unreadCount} new
-                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    clearAllAnnouncements()
+                  }}
+                  className="text-white hover:bg-white/20 text-xs h-8 px-3"
+                >
+                  Clear All
+                </Button>
               )}
             </SheetTitle>
-            <SheetDescription>
-              Latest announcements and updates
+            <SheetDescription className="text-sm text-white/95 mt-1">
+              Official announcements and system notifications
             </SheetDescription>
           </SheetHeader>
           
-          <div className="mt-6 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+          <div className="mt-6 space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
             {announcements.map((announcement) => (
               <Card 
                 key={announcement.id} 
-                className={`cursor-pointer transition-all hover:shadow-md ${
-                  isUnread(announcement) ? 'ring-2 ring-blue-200 bg-blue-50/50' : ''
+                className={`cursor-pointer transition-all duration-200 border hover:border-gray-400 ${
+                  isUnread(announcement) 
+                    ? 'bg-white shadow-sm' 
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
                 }`}
+                style={isUnread(announcement) ? { borderColor: '#8e0b16', borderWidth: '2px' } : {}}
                 onClick={() => handleAnnouncementClick(announcement)}
               >
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-1 rounded ${getTypeColor(announcement)}`}>
+                <CardHeader className="pb-3 pt-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className={`p-2 rounded-md flex-shrink-0 ${getTypeColor(announcement)}`}>
                         {getTypeIcon(announcement)}
                       </div>
-                      <CardTitle className="text-sm">{announcement.title}</CardTitle>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <CardTitle className="text-sm font-semibold text-gray-900 line-clamp-1">
+                            {announcement.title}
+                          </CardTitle>
+                          {isUnread(announcement) && (
+                            <div className="h-2 w-2 rounded-full flex-shrink-0" title="Unread" style={{ backgroundColor: '#8e0b16' }} />
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-600 line-clamp-2 leading-relaxed">
+                          {announcement.message}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {isUnread(announcement) && (
-                        <div className="h-2 w-2 bg-blue-500 rounded-full" />
-                      )}
+                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                       {announcement.priority && (
-                        <Badge className={getPriorityColor(announcement.priority)} variant="outline">
-                          {announcement.priority}
+                        <Badge className={`${getPriorityColor(announcement.priority)} text-xs px-2 py-0.5`} variant="outline">
+                          {announcement.priority.toUpperCase()}
                         </Badge>
                       )}
                       {announcement.isSystemNotification && (
-                        <Badge variant="secondary" className="text-xs">
-                          🔧 System
+                        <Badge variant="secondary" className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 border-purple-200">
+                          System
                         </Badge>
                       )}
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {announcement.message}
-                  </p>
-                  <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-                    <span>By {announcement.createdByName}</span>
-                    <div className="flex items-center gap-1">
+                <CardContent className="pt-0 pb-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500 flex items-center gap-1">
+                      <span className="font-medium text-gray-700">From:</span>
+                      {announcement.createdByName}
+                    </span>
+                    <div className="flex items-center gap-1.5 text-gray-500">
                       <Clock className="h-3 w-3" />
-                      <span>{announcement.createdAt.toLocaleDateString()}</span>
+                      <span>{announcement.createdAt.toLocaleDateString('en-US', { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        year: 'numeric' 
+                      })}</span>
                     </div>
                   </div>
                 </CardContent>
@@ -422,18 +496,32 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
 
       {/* Announcement Detail Modal */}
       <Dialog open={showModal} onOpenChange={handleModalClose}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <div className="flex items-center gap-2">
+        <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="space-y-3 pb-4" style={{ borderBottom: '2px solid #8e0b16' }}>
+            <div className="flex items-start gap-3">
               {selectedAnnouncement && (
                 <>
-                  <div className={`p-2 rounded ${getTypeColor(selectedAnnouncement)}`}>
+                  <div className={`p-3 rounded-lg ${getTypeColor(selectedAnnouncement)}`}>
                     {getTypeIcon(selectedAnnouncement)}
                   </div>
-                  <div>
-                    <DialogTitle>{selectedAnnouncement.title}</DialogTitle>
-                    <DialogDescription>
-                      From {selectedAnnouncement.createdByName} • {selectedAnnouncement.createdAt.toLocaleString()}
+                  <div className="flex-1 min-w-0">
+                    <DialogTitle className="text-xl font-semibold text-gray-900 mb-2">
+                      {selectedAnnouncement.title}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm text-gray-600">
+                      <div className="flex flex-col gap-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-medium text-gray-700">From:</span>
+                          {selectedAnnouncement.createdByName}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5" />
+                          {selectedAnnouncement.createdAt.toLocaleString('en-US', {
+                            dateStyle: 'full',
+                            timeStyle: 'short'
+                          })}
+                        </span>
+                      </div>
                     </DialogDescription>
                   </div>
                 </>
@@ -442,49 +530,47 @@ export function AnnouncementDisplay({ user, userRole }: AnnouncementDisplayProps
           </DialogHeader>
           
           {selectedAnnouncement && (
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                <Badge className={getTypeColor(selectedAnnouncement)} variant="outline">
-                  {selectedAnnouncement.isSystemNotification ? 'System' : selectedAnnouncement.type}
+            <div className="space-y-5 pt-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge className={`${getTypeColor(selectedAnnouncement)} text-xs px-3 py-1`} variant="outline">
+                  {selectedAnnouncement.isSystemNotification ? 'System Notification' : (selectedAnnouncement.type || 'Info').toUpperCase()}
                 </Badge>
                 {selectedAnnouncement.priority && (
-                  <Badge className={getPriorityColor(selectedAnnouncement.priority)} variant="outline">
-                    {selectedAnnouncement.priority} priority
-                  </Badge>
-                )}
-                {selectedAnnouncement.isSystemNotification && (
-                  <Badge variant="secondary">
-                    🔧 System Notification
+                  <Badge className={`${getPriorityColor(selectedAnnouncement.priority)} text-xs px-3 py-1`} variant="outline">
+                    {selectedAnnouncement.priority.toUpperCase()} PRIORITY
                   </Badge>
                 )}
               </div>
               
-              <div className="prose prose-sm max-w-none">
-                <p className="whitespace-pre-wrap">{selectedAnnouncement.message}</p>
-                {selectedAnnouncement.isSystemNotification && selectedAnnouncement.wheelTypeId && (
-                  <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                    <div className="flex items-center gap-2 text-purple-800">
-                      <Target className="h-4 w-4" />
-                      <span className="font-medium">New Wheel Type Available</span>
-                    </div>
-                    <p className="text-sm text-purple-700 mt-1">
-                      Check your wheel galleries to see the new wheel type in action!
-                    </p>
+              <div className="rounded-lg p-5 border" style={{ backgroundColor: '#fef8f8', borderColor: '#e8d4d4' }}>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: '#2d1517' }}>
+                  {selectedAnnouncement.message}
+                </p>
+              </div>
+              
+              {selectedAnnouncement.isSystemNotification && selectedAnnouncement.wheelTypeId && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 text-purple-900 mb-2">
+                    <Target className="h-5 w-5" />
+                    <span className="font-semibold">New Wheel Type Available</span>
                   </div>
-                )}
-              </div>
-              
-              {selectedAnnouncement.expiresAt && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>Expires: {selectedAnnouncement.expiresAt.toLocaleString()}</span>
+                  <p className="text-sm text-purple-800">
+                    A new wheel type has been added to the system. Check your wheel galleries to explore it!
+                  </p>
                 </div>
               )}
               
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Eye className="h-4 w-4" />
-                <span>Read by {selectedAnnouncement.readBy.length} users</span>
-              </div>
+              {selectedAnnouncement.expiresAt && (
+                <div className="flex items-center gap-2 text-sm text-white rounded-md px-3 py-2 mt-3" style={{ backgroundColor: '#8e0b16' }}>
+                  <Clock className="h-4 w-4" />
+                  <span>
+                    <span className="font-semibold">Expires:</span> {selectedAnnouncement.expiresAt.toLocaleString('en-US', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short'
+                    })}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

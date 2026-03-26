@@ -9,6 +9,7 @@ import { db } from "@/lib/firebase"
 import { collection, getDocs, addDoc, doc, updateDoc } from "firebase/firestore"
 import { toast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { TextWinnerPopup } from "@/components/shared/text-winner-popup"
 import { EnhancedWinnerPopup } from "@/components/shared/enhanced-winner-popup"
 import { CheckCircle2 } from "lucide-react"
 import {
@@ -238,15 +239,33 @@ export function CobyPicksWheel({
     setSpinDegree(targetDegree)
 
     spinTimeoutRef.current = setTimeout(async () => {
-      const selectedWinners: string[] = []
-      const availableSegments = [...segments]
-
-      for (let i = 0; i < numWinners; i++) {
-        if (availableSegments.length === 0) break
-        const randomIndex = Math.floor(Math.random() * availableSegments.length)
-        selectedWinners.push(availableSegments[randomIndex])
-        availableSegments.splice(randomIndex, 1) // Remove selected to avoid duplicates
+      // 🎯 FIXED: Use visual position for winner calculation instead of random selection
+      const wheelElement = document.getElementById("spinning-wheel")
+      if (!wheelElement) {
+        console.error("Wheel element not found for winner calculation")
+        return
       }
+
+      const style = window.getComputedStyle(wheelElement)
+      const transform = style.getPropertyValue("transform")
+      const matrix = new DOMMatrixReadOnly(transform)
+
+      // 🎯 FIXED: Correct rotation angle extraction from CSS transform matrix
+      const currentRotation = Math.atan2(-matrix.m21, matrix.m11) * (180 / Math.PI)
+      const normalizedCurrentRotation = ((currentRotation % 360) + 360) % 360
+
+      // Calculate winners based on visual position
+      const segmentAngleCalc = 360 / segments.length
+      const pointerAngle = normalizedCurrentRotation
+      const winningIndices: number[] = []
+
+      // Get all winning segments based on numWinners
+      for (let i = 0; i < numWinners && i < segments.length; i++) {
+        const winnerIndex = Math.floor((pointerAngle + i * segmentAngleCalc) / segmentAngleCalc) % segments.length
+        winningIndices.push(winnerIndex)
+      }
+
+      const selectedWinners = winningIndices.map(index => segments[index])
 
       setWinners(selectedWinners)
       setShowWinnersDialog(true)
@@ -330,34 +349,32 @@ export function CobyPicksWheel({
       const style = window.getComputedStyle(wheelElement)
       const transform = style.getPropertyValue("transform")
       const matrix = new DOMMatrixReadOnly(transform)
-      const currentRotation = Math.atan2(matrix.m21, matrix.m11) * (180 / Math.PI)
+      // 🎯 FIXED: Correct rotation angle extraction from CSS transform matrix
+      // CSS rotate(θ) creates matrix [cosθ, sinθ; -sinθ, cosθ]
+      // So θ = atan2(sinθ, cosθ) = atan2(matrix.m12, matrix.m11)
+      // Or θ = atan2(-matrix.m21, matrix.m11) for the same result
+      const currentRotation = Math.atan2(-matrix.m21, matrix.m11) * (180 / Math.PI)
 
       // Set the spinDegree to the current visual rotation, normalized to 0-360
       const normalizedCurrentRotation = ((currentRotation % 360) + 360) % 360
       setSpinDegree(normalizedCurrentRotation)
 
       // Immediately determine winner based on current rotation
-      const segmentAngle = 360 / segments.length
-      // Adjust for pointer at top (0 degrees) and wheel spinning clockwise
-      // The pointer is at the top (0 degrees). A segment is "won" if its center is at 0 degrees.
-      // We need to find which segment is currently at the top.
-      // The wheel rotates clockwise, so a positive spinDegree means it's rotating.
-      // To find the winning segment, we need to know which segment's "start" angle
-      // is just past the pointer, or whose "end" angle is just before the pointer.
-      // A simpler way: calculate the angle of the pointer relative to the segments.
-      // The wheel rotates, so the segments move. The pointer is fixed at 0 degrees (top).
-      // If the wheel has rotated `normalizedCurrentRotation` degrees clockwise,
-      // then the segment that is now at the top was originally `normalizedCurrentRotation` degrees counter-clockwise from the top.
-      // So, we need to find the segment whose original angle range contains `normalizedCurrentRotation` (relative to the top, counter-clockwise).
-      // Or, more simply, if the wheel has rotated X degrees, the winning segment is the one that is X degrees *behind* the pointer.
-      // The segments are drawn from 0 to 360. Segment 0 is from 0 to `angle`.
-      // The pointer is at the top (0 degrees).
-      // If the wheel rotates `R` degrees, the segment that ends up at the top is the one whose original position was `R` degrees counter-clockwise from the top.
-      // The angle of the pointer relative to the wheel's original orientation is `(360 - normalizedCurrentRotation) % 360`.
-      // This is the angle that the pointer "sees" on the wheel.
-      const pointerAngleOnWheel = (360 - normalizedCurrentRotation + 360) % 360 // Angle on the wheel that the pointer is pointing at
+      const segmentAngleCalc = 360 / segments.length
 
-      const winningIndex = Math.floor(pointerAngleOnWheel / segmentAngle)
+      // 🎯 FIXED: Correct angle calculation for precise pointer alignment
+      // COORDINATE SYSTEM: Canvas 0° = right (3 o'clock), but wheel displays with pointer at top
+      // For wheel display: 0° = top, clockwise rotation
+      // Pointer is positioned at the top (0° position)
+      // The wheel segments are drawn starting from angle 0 at top
+
+      // Convert the normalized rotation to match the wheel's coordinate system
+      // normalizedCurrentRotation is in degrees, we need to convert to match pointer position
+      const pointerAngle = normalizedCurrentRotation // Current wheel rotation in degrees
+
+      // Find which segment contains the pointer (0° position at top)
+      // Since segments are numbered 0, 1, 2, ... clockwise from 0° (top)
+      const winningIndex = Math.floor(pointerAngle / segmentAngleCalc) % segments.length
 
       const selectedWinner = segments[winningIndex]
       setWinners([selectedWinner])
@@ -475,8 +492,72 @@ export function CobyPicksWheel({
       </div>
 
       <div
-        className={`relative w-full max-w-md aspect-square mx-auto rounded-full ${getShadowClass(wheelShadow)}`}
+        className={`relative w-full mx-auto rounded-full ${getShadowClass(wheelShadow)}`}
         style={{
+          width: (() => {
+            // 🎯 CONSISTENT SIZING - Same size for all wheels
+            const screenWidth = window.innerWidth
+            const screenHeight = window.innerHeight
+
+            // 📱 ENHANCED RESPONSIVE BREAKPOINTS - More responsive sizing for all wheels
+            if (screenWidth < 320) {
+              return `${Math.min(300, screenWidth - 5, screenHeight - 110)}px`
+            } else if (screenWidth < 375) {
+              return `${Math.min(360, screenWidth - 10, screenHeight - 130)}px`
+            } else if (screenWidth < 414) {
+              return `${Math.min(400, screenWidth - 15, screenHeight - 150)}px`
+            } else if (screenWidth < 480) {
+              return `${Math.min(440, screenWidth - 20, screenHeight - 170)}px`
+            } else if (screenWidth < 640) {
+              return `${Math.min(520, screenWidth - 25, screenHeight - 190)}px`
+            } else if (screenWidth < 768) {
+              return `${Math.min(620, screenWidth - 35, screenHeight - 210)}px`
+            } else if (screenWidth < 1024) {
+              return `${Math.min(720, screenWidth - 45, screenHeight - 240)}px`
+            } else if (screenWidth < 1280) {
+              return `${Math.min(820, screenWidth - 55, screenHeight - 270)}px`
+            } else if (screenWidth < 1440) {
+              return `${Math.min(880, screenWidth - 65, screenHeight - 310)}px`
+            } else if (screenWidth < 1680) {
+              return `${Math.min(920, screenWidth - 75, screenHeight - 350)}px`
+            } else if (screenWidth < 1920) {
+              return `${Math.min(960, screenWidth - 85, screenHeight - 390)}px`
+            } else {
+              return `${Math.min(1050, screenWidth - 95, screenHeight - 430)}px`
+            }
+          })(),
+          height: (() => {
+            // 🎯 CONSISTENT SIZING - Same size for all wheels
+            const screenWidth = window.innerWidth
+            const screenHeight = window.innerHeight
+
+            // 📱 CONSISTENT BREAKPOINTS - Fixed sizing for all wheels
+            if (screenWidth < 320) {
+              return `${Math.min(280, screenWidth - 10, screenHeight - 120)}px`
+            } else if (screenWidth < 375) {
+              return `${Math.min(340, screenWidth - 15, screenHeight - 140)}px`
+            } else if (screenWidth < 414) {
+              return `${Math.min(380, screenWidth - 20, screenHeight - 160)}px`
+            } else if (screenWidth < 480) {
+              return `${Math.min(420, screenWidth - 25, screenHeight - 180)}px`
+            } else if (screenWidth < 640) {
+              return `${Math.min(480, screenWidth - 30, screenHeight - 200)}px`
+            } else if (screenWidth < 768) {
+              return `${Math.min(580, screenWidth - 40, screenHeight - 220)}px`
+            } else if (screenWidth < 1024) {
+              return `${Math.min(680, screenWidth - 50, screenHeight - 250)}px`
+            } else if (screenWidth < 1280) {
+              return `${Math.min(780, screenWidth - 60, screenHeight - 280)}px`
+            } else if (screenWidth < 1440) {
+              return `${Math.min(840, screenWidth - 70, screenHeight - 320)}px`
+            } else if (screenWidth < 1680) {
+              return `${Math.min(880, screenWidth - 80, screenHeight - 360)}px`
+            } else if (screenWidth < 1920) {
+              return `${Math.min(920, screenWidth - 90, screenHeight - 400)}px`
+            } else {
+              return `${Math.min(1000, screenWidth - 100, screenHeight - 440)}px`
+            }
+          })(),
           border: `${wheelBorderWidth}px solid ${wheelBorderColor}`,
           backgroundImage: wheelBgImage ? `url(${wheelBgImage})` : "none",
           backgroundSize: "cover",
@@ -499,17 +580,18 @@ export function CobyPicksWheel({
               const angle = 360 / segmentCount
               const midAngle = index * angle + angle / 2 // Midpoint angle of the segment
 
-              // Calculate position for text/image within the segment
-              // Assuming wheel radius is 50% of its container (max-w-md)
-              // Position text at 70% of the radius from the center
-              const textRadiusRatio = 0.7
+              // Enhanced responsive text positioning for larger wheels
+              // Adjusted radius ratio for better text fit with larger wheels
+              const screenWidth = window.innerWidth
+              const textRadiusRatio = screenWidth < 640 ? 0.65 : screenWidth < 1024 ? 0.68 : 0.72 // Closer positioning for better fit
+
               const x = 50 + textRadiusRatio * 50 * Math.sin((midAngle * Math.PI) / 180)
               const y = 50 - textRadiusRatio * 50 * Math.cos((midAngle * Math.PI) / 180)
 
               return (
                 <div
                   key={index}
-                  className="absolute text-white font-bold text-sm flex items-center justify-center"
+                  className="absolute text-white font-bold flex items-center justify-center"
                   style={{
                     left: `${x}%`,
                     top: `${y}%`,
@@ -517,8 +599,24 @@ export function CobyPicksWheel({
                     whiteSpace: "nowrap",
                     textAlign: "center",
                     pointerEvents: "none", // Prevent text from interfering with wheel clicks
-                    maxWidth: `${(Math.min(angle, 90) / 360) * 100}%`, // Limit text width based on segment angle
-                    maxHeight: "20%", // Limit text height
+                    // Enhanced responsive font sizing for all wheels
+                    fontSize: (() => {
+                      const screenWidth = window.innerWidth
+
+                      // More responsive font sizing
+                      if (screenWidth < 400) {
+                        return '14px' // Increased from 12px
+                      } else if (screenWidth < 700) {
+                        return '16px' // Increased from 14px
+                      } else if (screenWidth < 1024) {
+                        return '18px' // Increased from 16px
+                      } else {
+                        return '20px' // Increased for larger screens
+                      }
+                    })(),
+                    // Enhanced responsive max width based on segment angle and text length
+                    maxWidth: `${Math.max(15, Math.min(angle * 0.8, 90))}%`,
+                    maxHeight: "25%", // Increased height for better text fit
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     opacity: mysterySpin && spinning ? 0 : 1, // Hide text during mystery spin
@@ -606,11 +704,8 @@ export function CobyPicksWheel({
           }
         })}
         congratsMessage={congratulatoryMessage}
-        customWinnerMessage="🎊 Congratulations! 🎊"
-        customWinnerWord="Winner"
-        wheelType="regular"
+        wheelType={wheelType === "image" ? "image-picker" : "regular"}
         showConfetti={confettiAndSound}
-        customTitle={winners.length > 1 ? "🏆 WINNERS! 🏆" : "🏆 WINNER! 🏆"}
       />
     </div>
   )

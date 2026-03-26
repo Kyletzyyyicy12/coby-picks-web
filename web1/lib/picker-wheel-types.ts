@@ -11,6 +11,11 @@ export interface PickerWheelType {
   maxItems?: number
   minItems?: number
   hiddenForNewUsers?: boolean // Controls visibility for new organizers and participants
+  isSavedWheel?: boolean // Indicates if this is a saved custom wheel
+  savedWheelData?: any // Data for saved custom wheels
+  isDynamic?: boolean // Indicates if this is a dynamic wheel type from Firestore
+  allowedRoles?: string[] // Roles allowed to use this wheel
+  canBeShared?: boolean // Whether this wheel can be shared
   // Enhanced features for specialized wheel types
   features?: {
     supportsImages?: boolean
@@ -23,17 +28,6 @@ export interface PickerWheelType {
 }
 
 export const PICKER_WHEEL_TYPES: PickerWheelType[] = [
-  // Basic Picker Wheels
-  {
-    id: "basic-picker",
-    title: "Picker Wheel",
-    description: "Make random decisions from your custom options",
-    icon: "🎯",
-    category: "personal",
-    defaultItems: ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5"],
-    color: "#8e0b16",
-    isCustomizable: true
-  },
   {
     id: "team-picker",
     title: "Team Picker Wheel",
@@ -71,6 +65,19 @@ export const PICKER_WHEEL_TYPES: PickerWheelType[] = [
     maxItems: 100,
     hiddenForNewUsers: true
   },
+  {
+    id: "letter-picker",
+    title: "Letter Picker Wheel",
+    description: "Generate random letters from the alphabet",
+    icon: "🔤",
+    category: "academic",
+    defaultItems: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],
+    color: "#7c3aed",
+    isCustomizable: true,
+    maxItems: 26,
+    minItems: 2,
+    hiddenForNewUsers: true
+  },
 
   // Geographic Wheels
   {
@@ -83,6 +90,24 @@ export const PICKER_WHEEL_TYPES: PickerWheelType[] = [
     color: "#059669",
     isCustomizable: true,
     hiddenForNewUsers: true
+  },
+  {
+    id: "research-participant-picker",
+    title: "Research Participant Selector",
+    description: "Randomly select participants for research studies from uploaded student/participant lists. Supports CSV upload and multiple winner selection.",
+    icon: "🔬",
+    category: "research",
+    defaultItems: [
+      "Participant 001", "Participant 002", "Participant 003", "Participant 004", "Participant 005",
+      "Participant 006", "Participant 007", "Participant 008", "Participant 009", "Participant 010",
+      "Participant 011", "Participant 012", "Participant 013", "Participant 014", "Participant 015",
+      "Participant 016", "Participant 017", "Participant 018", "Participant 019", "Participant 020"
+    ],
+    color: "#0891b2",
+    isCustomizable: true,
+    maxItems: 1000, // Support large participant lists
+    minItems: 2,
+    hiddenForNewUsers: false // Make visible for researchers
   },
 
   // Visual & Media Wheels
@@ -225,17 +250,17 @@ export const getVisiblePickerWheels = (
     if (userRole === 'admin') {
       return true
     }
-    
+
     // If wheel is not hidden for new users, show it
     if (!wheel.hiddenForNewUsers) {
       return true
     }
-    
+
     // If admin has overridden visibility for this wheel, show it
     if (adminOverrides && adminOverrides.has(wheel.id)) {
       return true
     }
-    
+
     // Hide the wheel for new organizers and participants
     return false
   })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,18 +10,38 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
 import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, getDoc } from "firebase/firestore"
-import { Radio, Loader2, CheckCircle, AlertCircle } from "lucide-react"
+import { Radio, Loader2, CheckCircle, AlertCircle, QrCode, Camera, Keyboard } from "lucide-react"
+
+// Dynamic import for QR scanner to handle browser compatibility
+let BrowserQRCodeReader: any = null;
+if (typeof window !== 'undefined') {
+  try {
+    // Will import @zxing/browser once npm install completes
+    import('@zxing/browser').then((module) => {
+      BrowserQRCodeReader = module.BrowserQRCodeReader;
+    }).catch(() => {
+      console.log('QR scanner library not available, using manual entry only');
+    });
+  } catch {
+    console.log('QR scanner library not available');
+  }
+}
 
 interface EnhancedStudentJoinProps {
   onJoinSuccess?: (sessionId: string, studentName: string) => void
 }
 
 export function EnhancedStudentJoin({ onJoinSuccess }: EnhancedStudentJoinProps) {
+  const [activeTab, setActiveTab] = useState<'manual' | 'qr'>('manual')
   const [roomCode, setRoomCode] = useState("")
   const [studentName, setStudentName] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [sessionFound, setSessionFound] = useState<any>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [scannedData, setScannedData] = useState("")
   const router = useRouter()
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const codeReaderRef = useRef<any>(null)
 
   const formatRoomCode = (value: string) => {
     return value.replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 6)
@@ -140,11 +160,11 @@ export function EnhancedStudentJoin({ onJoinSuccess }: EnhancedStudentJoinProps)
         lastSeen: serverTimestamp(),
         platform: 'web',
         connectionId: viewerId,
-        userAgent: navigator.userAgent,
+        userAgent: (typeof navigator !== 'undefined' && navigator?.userAgent) || 'Unknown',
         sessionId: sessionId,
         isOnline: true,
         lastActivity: serverTimestamp(),
-        participantType: 'student'
+        role: 'participant'
       }
 
       await setDoc(doc(db, "liveDrawSessions", sessionId, "viewers", viewerId), viewerData)

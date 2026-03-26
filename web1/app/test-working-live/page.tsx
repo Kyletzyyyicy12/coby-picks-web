@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { WorkingLiveSessionManager } from "@/components/live/working-live-session-manager"
+import { EnhancedRoomManager } from "@/components/live/enhanced-room-manager"
 import { WorkingParticipantJoin } from "@/components/live/working-participant-join"
 import { Users, Radio, Eye } from "lucide-react"
 import type { User as FirebaseUser } from "firebase/auth"
@@ -150,9 +150,8 @@ export default function TestWorkingLivePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <WorkingLiveSessionManager
+              <EnhancedRoomManager
                 user={mockUser}
-                participants={testParticipants}
                 onAddParticipant={(participant) => {
                   console.log("New participant added:", participant)
                 }}

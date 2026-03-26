@@ -369,7 +369,7 @@ class CrossPlatformSessionManager {
       lastSeen: Timestamp.fromDate(new Date()),
       isActive: true,
       connectionId: viewerId,
-      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+      userAgent: typeof navigator !== 'undefined' && navigator?.userAgent ? navigator.userAgent : 'unknown',
     };
 
     await setDoc(

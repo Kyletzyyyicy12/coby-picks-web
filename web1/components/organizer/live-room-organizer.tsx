@@ -27,8 +27,7 @@ import {
   writeBatch,
   limit
 } from "firebase/firestore"
-import { PickerWheelGallery } from "@/components/picker-wheels/picker-wheel-gallery"
-import { WheelTypeProvider } from "@/components/providers/wheel-type-provider"
+
 import { type PickerWheelType } from "@/lib/picker-wheel-types"
 import CrossPlatformSessionManager from "@/lib/CrossPlatformSessionManager"
 import { createSessionThemeConfig } from "@/lib/ThemeMapper"
@@ -36,7 +35,6 @@ import CollaborativeLiveRoomManager from "@/lib/collaborative-live-room-manager"
 import { useAuth } from "@/contexts/AuthContext"
 import { OrganizerRequestManager } from "@/components/live/organizer-request-manager"
 import { EnhancedWheel } from "@/components/randomizer/enhanced-wheel"
-import { EnhancedWinnerPopup } from "@/components/shared/enhanced-winner-popup"
 import {
   Users,
   Play,
@@ -187,6 +185,11 @@ export function LiveRoomOrganizer({
     enableThemeSync: true // Enable theme synchronization by default
   })
 
+  // Collaboration invitation state
+  const [showInviteDialog, setShowInviteDialog] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [isInviting, setIsInviting] = useState(false)
+
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -267,7 +270,7 @@ export function LiveRoomOrganizer({
         winners: [],
 
         // Enhanced wheel information
-        wheelType: sessionSettings.selectedWheelType?.id || "basic-picker",
+        wheelType: sessionSettings.selectedWheelType?.id || "team-picker",
         wheelTitle: sessionSettings.selectedWheelType?.title || "Live Wheel",
         wheelItems: sessionSettings.selectedWheelType?.defaultItems || participants.map(p => p.name),
         selectedWheelType: sessionSettings.selectedWheelType,
@@ -376,7 +379,7 @@ export function LiveRoomOrganizer({
             winners: data.winners || [],
 
             // Enhanced wheel information
-            wheelType: data.wheelType || 'basic-picker',
+            wheelType: data.wheelType || 'team-picker',
             wheelTitle: data.wheelTitle || 'Live Wheel',
             wheelItems: data.wheelItems || [],
             selectedWheelType: data.selectedWheelType || null,
@@ -588,184 +591,13 @@ export function LiveRoomOrganizer({
     }
   }, [session, currentUser, userProfile])
   
-  // Enhanced start spinning with collaborative action
-  const startSpinning = async () => {
-    if (!session) return
-
-    try {
-      if (collaborativeManager) {
-        // Use collaborative manager for shared control
-        const result = await collaborativeManager.executeCollaborativeAction({
-          sessionId: session.id,
-          wheelId: session.id, // Use session ID as wheel ID for live sessions
-          action: 'start_spin',
-          performedBy: currentUser?.uid || user.uid,
-          performedByName: userProfile?.name || 'Organizer',
-          parameters: {
-            spinDuration: 3500,
-            totalRotation: (5 + Math.random() * 5) * 360,
-            finalAngle: Math.random() * 360
-          }
-        })
-        
-        if (!result.success) {
-          toast({
-            title: "🚫 Action Blocked",
-            description: result.message,
-            variant: "destructive"
-          })
-          return
-        }
-        
-        if (isCollaborating) {
-          toast({
-            title: "🤝 Collaborative Action",
-            description: `Wheel spinning started! ${activeCollaborators.length} other organizer(s) can see this in real-time.`,
-            duration: 4000,
-          })
-        }
-      } else {
-        // Fallback to original startSpinning logic
-        // Calculate precise spinning parameters for real-time sync
-        const spinStartTime = Date.now()
-        const spinDuration = 3500 // 3.5 seconds
-        const randomSpins = 5 + Math.random() * 5 // 5-10 full rotations
-        const finalAngle = Math.random() * 360 // Random final position
-        const totalRotation = randomSpins * 360 + finalAngle
-        
-        // Enhanced timing data for perfect synchronization
-        const exactSyncData = {
-          spinStartTime,
-          spinDuration,
-          totalRotation,
-          finalAngle,
-          randomSpins,
-          calculatedAt: Date.now(),
-          organizerTimestamp: spinStartTime
-        }
-      
-        console.log('🎯 ORGANIZER: Starting wheel spin with EXACT timing data:', exactSyncData)
-
-        // 🚀 PRIORITY: INSTANT zero-delay broadcast for immediate participant synchronization
-        await updateDoc(doc(db, "liveDrawSessions", session.id), {
-          currentState: "spinning",
-          lastUpdated: Timestamp.fromDate(new Date()),
-          // 💥 Enhanced wheel state with INSTANT synchronization flags
-          wheelState: {
-            isSpinning: true,
-            ...exactSyncData,
-            currentAngle: 0,
-            progress: 0,
-            startedAt: Timestamp.fromDate(new Date()),
-            // 🚀 PRIORITY synchronization metadata for zero delay
-            syncVersion: Date.now(),
-            participantCount: session.participants.length + viewers.length,
-            instantStart: true,
-            participantSync: "immediate",
-            accuracyMode: "exact",
-            zeroDelay: true
-          },
-          // 🚀 PRIORITY spinning notification for instant participant response
-          spinningNotification: {
-            message: "🎯 WHEEL SPINNING NOW! Watch live!",
-            timestamp: Timestamp.fromDate(new Date()),
-            isActive: true,
-            duration: spinDuration,
-            priority: "immediate", // Highest priority for instant display
-            zeroDelay: true // Flag for immediate participant response
-          },
-          // 💥 Force immediate sync heartbeat
-          syncHeartbeat: Date.now(),
-          broadcastTime: Date.now()
-        })
-
-        toast({
-          title: "🎯 Wheel Started Spinning!",
-          description: `All ${session.participants.length + viewers.length} participants can see the wheel spinning with ZERO DELAY`,
-          duration: 5000,
-        })
-
-        // 🚀 OPTIMIZED real-time angle updates for maximum responsiveness
-        const angleUpdateInterval = setInterval(async () => {
-          const elapsed = Date.now() - spinStartTime
-          const progress = Math.min(elapsed / spinDuration, 1)
-        
-          // Enhanced easing function for realistic deceleration
-          const easeOut = 1 - Math.pow(1 - progress, 3)
-          const currentAngle = totalRotation * easeOut
-        
-          try {
-            // 💥 Optimized update frequency (every 250ms) for best balance of responsiveness and performance
-            await updateDoc(doc(db, "liveDrawSessions", session.id), {
-              "wheelState.currentAngle": currentAngle,
-              "wheelState.progress": progress,
-              "wheelState.elapsedTime": elapsed,
-              "wheelState.remainingTime": Math.max(0, spinDuration - elapsed),
-              lastUpdated: Timestamp.fromDate(new Date()),
-              // 🚀 Enhanced participant sync heartbeat for immediate response
-              syncHeartbeat: Date.now(),
-              participantSync: "immediate" // Maintain priority sync
-            })
-          
-            console.log('🔄 PRIORITY SYNC UPDATE:', {
-              progress: Math.round(progress * 100) + '%',
-              currentAngle: Math.round(currentAngle),
-              elapsed: elapsed + 'ms',
-              remaining: Math.max(0, spinDuration - elapsed) + 'ms',
-              priority: 'immediate'
-            })
-          } catch (error) {
-            console.warn('⚠️ Minor sync error during spin:', error)
-          }
-        
-          // Stop updating when spin is complete
-          if (progress >= 1) {
-            clearInterval(angleUpdateInterval)
-            console.log('✅ ORGANIZER: Spin animation complete, finalizing...')
-          }
-        }, 250) // Optimized from 300ms to 250ms for better responsiveness
-
-        // Complete the spin and select winners after precise duration
-        setTimeout(async () => {
-          clearInterval(angleUpdateInterval)
-        
-          console.log('🏁 ORGANIZER: Finalizing spin at final angle:', finalAngle)
-        
-          // Mark spinning as complete with final state
-          await updateDoc(doc(db, "liveDrawSessions", session.id), {
-            "wheelState.isSpinning": false,
-            "wheelState.currentAngle": finalAngle,
-            "wheelState.progress": 1,
-            "wheelState.completedAt": Timestamp.fromDate(new Date()),
-            "wheelState.finalizedAt": Date.now(),
-            "spinningNotification.isActive": false,
-            currentState: "selecting", // Intermediate state before completed
-            syncHeartbeat: Date.now()
-          })
-        
-          // Brief pause to show final position to all participants
-          setTimeout(async () => {
-            console.log('🏆 ORGANIZER: Selecting winners...')
-            await selectWinners()
-          }, 800) // Longer pause for dramatic effect
-        }, spinDuration)
-
-      }
-    } catch (error) {
-      console.error("❌ Error starting collaborative spin:", error)
-      toast({
-        title: "Error",
-        description: "Failed to start wheel spinning",
-        variant: "destructive"
-      })
-    }
-  }
 
   // Enhanced winner selection with real-time broadcasting
   const selectWinners = async () => {
     if (!session) return
 
     try {
+      console.log("🎯 ORGANIZER: Manual selectWinners triggered - checking wheel submission")
       const availableParticipants = [...session.participants]
       const selectedWinners = []
 
@@ -814,8 +646,8 @@ export function LiveRoomOrganizer({
         // 🚀 PRIORITY result notification for INSTANT participant response
         resultNotification: {
           message: selectedWinners.length === 1
-            ? `🏆  WINNER: ${selectedWinners[0].name}! 🏆`
-            : `🏆 🎉 WINNERS: ${selectedWinners.map(w => w.name).join(', ')}! 🏆`,
+            ? `🎉 WINNER: ${selectedWinners[0].name}!`
+            : `🎉 WINNERS: ${selectedWinners.map(w => w.name).join(', ')}!`,
           winners: selectedWinners,
           timestamp: Timestamp.fromDate(new Date()),
           isActive: true,
@@ -875,18 +707,24 @@ export function LiveRoomOrganizer({
     if (!session) return
 
     try {
-      // Reset to waiting state
+      // Calculate exact reset position (same as final angle to maintain consistency)
+      const resetPosition = session.wheelState?.finalAngle || 0
+
+      // Reset to waiting state with exact reset position
       await updateDoc(doc(db, "liveDrawSessions", session.id), {
         currentState: "waiting",
         isSpinning: false,
         winners: [],
         lastUpdated: Timestamp.fromDate(new Date()),
-        // Clear wheel state for next spin
+        // Clear wheel state for next spin with exact reset position
         wheelState: {
           isSpinning: false,
-          currentAngle: 0,
+          currentAngle: resetPosition,
           progress: 0,
-          hasResults: false
+          hasResults: false,
+          resetPosition: resetPosition, // Send exact reset position to participants
+          zeroDelay: true,
+          participantSync: 'immediate'
         },
         // Clear notifications to prevent duplicate messages
         spinningNotification: {
@@ -895,7 +733,10 @@ export function LiveRoomOrganizer({
         resultNotification: {
           isActive: false,
           showConfetti: false
-        }
+        },
+        // Force immediate sync heartbeat
+        syncHeartbeat: Date.now(),
+        resetBroadcastTime: Date.now()
       })
 
       toast({
@@ -904,7 +745,7 @@ export function LiveRoomOrganizer({
         duration: 4000,
       })
 
-      console.log('✅ Wheel reset successfully - ready for next spin')
+      console.log('✅ Wheel reset successfully - ready for next spin at position:', resetPosition)
 
     } catch (error) {
       console.error("Error resetting wheel:", error)
@@ -1056,6 +897,93 @@ export function LiveRoomOrganizer({
       toast({
         title: "Copy Failed",
         description: "Could not copy room code",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Create collaboration invitation
+  const createCollaborationInvitation = async (organizerEmail: string) => {
+    if (!session || !roomCode) {
+      toast({
+        title: "Error",
+        description: "No active session found. Please create a session first.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    try {
+      console.log('🤝 Creating collaboration invitation for:', organizerEmail)
+
+      const invitationData = {
+        sessionId: session.id,
+        sessionTitle: session.title,
+        sessionDescription: session.description,
+        wheelType: session.wheelType || 'team-picker',
+        wheelTitle: session.wheelTitle || 'Live Wheel',
+        wheelIcon: session.selectedWheelType?.icon || '🎯',
+        roomCode: roomCode, // ✅ Include the correct room code from the live session
+
+        // Inviter information
+        invitedBy: user.uid,
+        invitedByName: userProfile?.name || user.displayName || 'Organizer',
+        invitedByEmail: user.email || '',
+
+        // Invitee information
+        invitedOrganizerEmail: organizerEmail,
+        invitedOrganizer: null, // Will be filled when they accept
+
+        // Invitation details
+        status: 'sent',
+        type: 'live_room_invitation',
+        createdAt: serverTimestamp(),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+
+        // Session configuration
+        sessionConfig: {
+          maxParticipants: session.maxParticipants || 50,
+          allowReactions: session.settings?.allowReactions ?? true,
+          confettiEffect: true,
+          soundEffects: true,
+          liveSession: true,
+          allowDataSync: true
+        },
+
+        // Collaboration permissions
+        permissions: {
+          canControlLive: true,
+          canEditWheel: true,
+          canManageParticipants: true,
+          canEndSession: false, // Only primary organizer can end
+          canInviteOthers: false
+        },
+
+        // Notification metadata
+        isRealTimeNotification: true,
+        priority: 'high',
+        requiresImmediateAttention: true,
+
+        // Track notification delivery
+        notificationSent: true,
+        sentAt: serverTimestamp()
+      }
+
+      // Create the invitation directly
+      const docRef = await addDoc(collection(db, "liveRoomInvitations"), invitationData)
+
+      toast({
+        title: "🤝 Collaboration Invitation Sent!",
+        description: `Invitation sent to ${organizerEmail} with room code: ${roomCode}`,
+        duration: 6000,
+      })
+      console.log('✅ Collaboration invitation created successfully:', docRef.id)
+
+    } catch (error: any) {
+      console.error('❌ Error creating collaboration invitation:', error)
+      toast({
+        title: "Error Creating Invitation",
+        description: error.message || "Failed to send collaboration invitation. Please try again.",
         variant: "destructive"
       })
     }
@@ -1450,7 +1378,7 @@ export function LiveRoomOrganizer({
                         variant="outline"
                         onClick={() => {
                           const shareText = `Join my live wheel session!\n\nRoom Code: ${roomCode}\n\nOn web: Visit [your-website]/join\nOn mobile: Use the CobyPicks app and enter the room code\n\nLet's see who gets picked! 🎯`;
-                          
+
                           if (navigator.share) {
                             navigator.share({
                               title: 'Join Live Wheel Session',
@@ -1477,84 +1405,15 @@ export function LiveRoomOrganizer({
                         <Users className="h-4 w-4 mr-2" />
                         Send Invites
                       </Button>
-                      
-                      {session.currentState === 'waiting' && (
-                        <Button
-                          onClick={startSpinning}
-                          className="h-12 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl font-semibold"
-                        >
-                          <Play className="h-4 w-4 mr-2" />
-                          Start Wheel
-                        </Button>
-                      )}
-                      
-                      {session.currentState === 'spinning' && (
-                        <Button
-                          disabled
-                          className="h-12 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl font-semibold"
-                        >
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Spinning...
-                        </Button>
-                      )}
-                      
-                      {/* ⚡ AUTOMATIC Unlimited Spins - "Start Wheel" shows immediately after winners */}
-                      {/* Note: Manual reset available via function if needed */}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
 
-              {/* Wheel Display */}
-              <Card className="border-0 shadow-sm bg-white rounded-2xl">
-                <CardContent className="p-6">
-                  <div className="flex justify-center">
-                    <div className="w-full max-w-none">
-                      {(session.selectedWheelType?.id === 'team-picker' || session.wheelType === 'team-picker') ? (
-                        <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
-                          <div className="text-center mb-4">
-                            <h3 className="text-lg font-semibold text-blue-900 mb-2">
-                              👥 Team Picker Wheel
-                            </h3>
-                            <p className="text-sm text-blue-700">
-                              The organizer is using Team Picker to generate random teams
-                            </p>
-                          </div>
-                          <div className="text-center text-xs text-blue-600">
-                            🎯 Synchronized with organizer's team generation
-                          </div>
-                        </div>
-                      ) : (
-                        <EnhancedWheel
-                          participants={session.selectedWheelType?.defaultItems ?
-                            session.selectedWheelType.defaultItems.map((item: string, index: number) => ({
-                              id: `wheel-item-${index}`,
-                              name: item,
-                              email: undefined,
-                              isSelected: true
-                            })) :
-                            session.participants?.map(p => ({
-                              id: p.id,
-                              name: p.name,
-                              email: p.email,
-                              isSelected: true
-                            })) || []}
-                          onSpinComplete={(result) => {
-                            console.log("Organizer wheel spin completed:", result)
-                          }}
-                          onWinnersDetected={(detectedWinners) => {
-                            console.log("Organizer wheel winners detected:", detectedWinners)
-                          }}
-                          isLiveMode={true}
-                          sessionId={session.id}
-                          disabled={session.currentState === "ended"}
-                          selectedWheelType={session.selectedWheelType as any}
-                          wheelTitle={session.selectedWheelType?.title || session.wheelTitle || session.title}
-                          enableRealTimeSync={true}
-                          organizerMode={true}
-                          studentMode={false}
-                        />
-                      )}
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowInviteDialog(true)}
+                        className="h-12 border-green-200 text-green-700 hover:bg-green-50 rounded-xl"
+                      >
+                        <Users className="h-4 w-4 mr-2" />
+                        🤝 Invite Collaborator
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -1612,6 +1471,91 @@ export function LiveRoomOrganizer({
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Enhanced Wheel Component for Organizer */}
+              {session && (
+                <Card className="border-0 shadow-sm bg-white rounded-2xl">
+                  <CardHeader className="border-b border-gray-100 pb-4">
+                    <CardTitle className="text-lg flex items-center gap-3 text-gray-900">
+                      <div className="p-2 bg-green-100 rounded-lg">
+                        <Target className="h-5 w-5 text-green-600" />
+                      </div>
+                      Live Wheel Control
+                    </CardTitle>
+                    <CardDescription className="text-gray-600">
+                      Control the wheel spinning and synchronization for all participants
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <EnhancedWheel
+                      participants={session.participants || []}
+                      isLiveMode={true}
+                      sessionId={session.id}
+                      selectedWheelType={session.selectedWheelType}
+                      enableRealTimeSync={true}
+                      organizerMode={true}
+                      userPermissions={{
+                        isFullAccessCollaborator: userProfile?.role === 'collaborator' || false,
+                        canTriggerSynchronizedSpin: true,
+                        synchronizationEnabled: true,
+                        sessionId: session.id,
+                        userRole: userProfile?.role || 'organizer'
+                      }}
+                      wheelTitle={session.wheelTitle || session.selectedWheelType?.title}
+                      customCongratsMessage={session.settings?.congratsMessage || ""}
+                      customItems={session.wheelItems}
+                      onWinnersDetected={(winners) => {
+                        console.log("🎯 ORGANIZER: onWinnersDetected callback triggered!", {
+                          winnerCount: winners?.length || 0,
+                          winners: winners?.map(w => w.name) || [],
+                          hasWinners: !!(winners && winners.length > 0),
+                          winnersType: typeof winners,
+                          timestamp: new Date().toISOString()
+                        })
+
+                        // CRITICAL FIX: Handle winner announcements when collaborator spins
+                        if (winners && winners.length > 0) {
+                          console.log("🎯 ORGANIZER: Processing winner announcement - showing toast and effects", {
+                            winnerCount: winners.length,
+                            winners: winners.map(w => w.name),
+                            firstWinner: winners[0]?.name,
+                            sessionId: session?.id
+                          })
+
+                          // Show immediate toast notification for organizer
+                          toast({
+                            title: "🎯 Winner Selected!",
+                            description: winners.length === 1
+                              ? `${winners[0].name} has been selected!`
+                              : `${winners.length} winners selected: ${winners.map(w => w.name).join(', ')}`,
+                            duration: 5000,
+                          })
+
+                          // Trigger confetti effect for organizer
+                          import('canvas-confetti').then((confetti) => {
+                            confetti.default({
+                              particleCount: 100,
+                              spread: 70,
+                              origin: { y: 0.6 }
+                            })
+                          }).catch(console.warn)
+
+                          console.log("🎯 ORGANIZER: Winner announcement completed successfully", {
+                            winnerCount: winners.length,
+                            winners: winners.map(w => w.name),
+                            announcementCompleted: true
+                          })
+                        } else {
+                          console.warn("🎯 ORGANIZER: onWinnersDetected called but no winners provided", {
+                            winners,
+                            winnerCount: winners?.length || 0
+                          })
+                        }
+                      }}
+                    />
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Connection Status */}
               <Card className="border-0 shadow-sm bg-white rounded-2xl">
@@ -1867,7 +1811,7 @@ export function LiveRoomOrganizer({
                             <p className="font-semibold text-yellow-900 text-lg">{winner.name}</p>
                             {winner.email && <p className="text-sm text-yellow-700">{winner.email}</p>}
                           </div>
-                          <div className="text-2xl">🏆</div>
+                          <div className="text-2xl">✓</div>
                         </div>
                       ))}
                     </div>
@@ -1889,22 +1833,6 @@ export function LiveRoomOrganizer({
           </div>
         )}
 
-        {/* Enhanced Winner Popup for Organizer */}
-        {session?.winners && session.winners.length > 0 && (
-          <EnhancedWinnerPopup
-            isOpen={true}
-            onClose={() => {
-              // Clear winners when popup is closed
-              setSession(prev => prev ? { ...prev, winners: [] } : null)
-            }}
-            winners={session.winners}
-            congratsMessage={session.settings?.congratsMessage || "Congratulations, {name}! 🎉"}
-            showConfetti={true}
-            autoClose={15}
-            customTitle={session.title}
-          />
-        )}
-
         {/* Wheel Type Selector Dialog */}
         <Dialog open={sessionSettings.showWheelSelector} onOpenChange={(open) =>
           setSessionSettings(prev => ({ ...prev, showWheelSelector: open }))
@@ -1920,68 +1848,109 @@ export function LiveRoomOrganizer({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="mt-4">
-              <WheelTypeProvider userRole="organizer">
-                <PickerWheelGallery
-                  onSelectWheel={(wheel) => {
-                    // Only log in development
-                    if (process.env.NODE_ENV === 'development') {
-                      console.log("🎯 Wheel selected in gallery:", wheel)
+            <div className="mt-4 text-center py-12">
+              <div className="text-6xl mb-4">🎯</div>
+              <h2 className="text-2xl font-bold mb-2">Wheel Type Selection</h2>
+              <p className="text-muted-foreground mb-4">
+                The wheel type selection gallery is currently unavailable. Please use the dashboard to select wheel types.
+              </p>
+              <Button onClick={() => setSessionSettings(prev => ({ ...prev, showWheelSelector: false }))}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Collaboration Invitation Dialog */}
+        <Dialog open={showInviteDialog} onOpenChange={setShowInviteDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                🤝 Invite Collaborator
+              </DialogTitle>
+              <DialogDescription>
+                Invite another organizer to collaborate on this live session. They'll receive a notification with the room code.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="collaboratorEmail">Collaborator Email Address</Label>
+                <Input
+                  id="collaboratorEmail"
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="organizer@example.com"
+                  className="h-12"
+                />
+              </div>
+
+              {roomCode && (
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-blue-800">
+                    <strong>Room Code:</strong> {roomCode}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    This room code will be included in the invitation
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1 bg-green-600 hover:bg-green-700"
+                  onClick={async () => {
+                    if (!inviteEmail.trim()) {
+                      toast({
+                        title: "Email Required",
+                        description: "Please enter the collaborator's email address",
+                        variant: "destructive"
+                      })
+                      return
                     }
 
-                    setSessionSettings(prev => ({
-                      ...prev,
-                      selectedWheelType: wheel,
-                      showWheelSelector: false
-                    }))
-     
-                    // If session exists, batch the update with existing data
-                    if (session) {
-                      if (process.env.NODE_ENV === 'development') {
-                        console.log("🔄 Broadcasting wheel type change to all participants:", wheel.id)
-                        console.log("🔄 Wheel items:", wheel.defaultItems)
-                      }
-     
-                      // Use setDoc with merge to avoid conflicts and ensure immediate broadcast
-                      setDoc(doc(db, "liveDrawSessions", session.id), {
-                        selectedWheelType: wheel,
-                        wheelType: wheel.id,
-                        wheelTitle: wheel.title,
-                        wheelItems: wheel.defaultItems, // Ensure wheel items are updated
-                        wheelTypeUpdatedBy: user.uid,
-                        wheelTypeUpdatedAt: serverTimestamp(),
-                        lastUpdated: serverTimestamp()
-                      }, { merge: true }).then(() => {
-                        if (process.env.NODE_ENV === 'development') {
-                          console.log("✅ Wheel type broadcasted successfully to all participants")
-                          console.log("✅ Participants will see:", wheel.title, "with", wheel.defaultItems?.length, "items")
-                        }
-                        
-                        // Show success toast
-                        toast({
-                          title: "🎉 Wheel Type Updated!",
-                          description: `All participants can now see the ${wheel.title} wheel in real-time`,
-                          duration: 5000,
-                        })
-                      }).catch(error => {
-                        console.error("❌ Error broadcasting wheel type:", error)
-                        toast({
-                          title: "Error",
-                          description: "Failed to update wheel type for participants",
-                          variant: "destructive"
-                        })
+                    if (!inviteEmail.includes('@')) {
+                      toast({
+                        title: "Invalid Email",
+                        description: "Please enter a valid email address",
+                        variant: "destructive"
                       })
-                    } else {
-                      // Just update local settings if no active session
-                      if (process.env.NODE_ENV === 'development') {
-                        console.log("📝 Updated session settings (no active session):", wheel.id)
-                      }
+                      return
                     }
+
+                    setIsInviting(true)
+                    await createCollaborationInvitation(inviteEmail.trim())
+                    setIsInviting(false)
+                    setShowInviteDialog(false)
+                    setInviteEmail('')
                   }}
-                  userRole="organizer"
-                  user={user}
-                />
-              </WheelTypeProvider>
+                  disabled={isInviting || !inviteEmail.trim()}
+                >
+                  {isInviting ? (
+                    <div className="flex items-center gap-2">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      Sending...
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Send Invitation
+                    </div>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowInviteDialog(false)
+                    setInviteEmail('')
+                  }}
+                  disabled={isInviting}
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

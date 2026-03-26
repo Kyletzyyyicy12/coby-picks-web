@@ -210,10 +210,10 @@ export function EnhancedParticipantJoin({
       
       // Detect platform for cross-platform support
       const detectPlatform = () => {
-        const userAgent = navigator.userAgent.toLowerCase()
+        const userAgent = (typeof navigator !== 'undefined' && navigator?.userAgent?.toLowerCase()) || ''
         if (userAgent.includes('mobile') || userAgent.includes('android') || userAgent.includes('iphone')) {
           return 'mobile'
-        } else if (window.location.href.includes('app://') || window.location.href.includes('cobypicks://')) {
+        } else if (typeof window !== 'undefined' && (window.location.href.includes('app://') || window.location.href.includes('cobypicks://'))) {
           return 'app'
         } else {
           return 'web'
@@ -231,7 +231,7 @@ export function EnhancedParticipantJoin({
         lastSeen: serverTimestamp(),
         platform: platform,
         connectionId: viewerId,
-        userAgent: navigator.userAgent,
+        userAgent: (typeof navigator !== 'undefined' && navigator?.userAgent) || 'Unknown',
         sessionId: sessionPreview.sessionId,
         isOnline: true,
         lastActivity: serverTimestamp()

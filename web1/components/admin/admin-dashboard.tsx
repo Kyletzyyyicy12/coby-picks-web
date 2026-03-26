@@ -36,7 +36,7 @@ import {
   User,
   ChevronDown,
 } from "lucide-react"
-import { sendEmailNotification } from "@/lib/admin-actions"
+import { sendEmailNotification, sendUserWelcomeEmail } from "@/lib/admin-actions"
 import {
   Dialog,
   DialogContent,
@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/dialog"
 import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell, TableCaption } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -59,6 +60,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 import { SuperAdminManager } from "@/components/auth/super-admin-manager"
 import { WheelTypeManager } from "@/components/admin/wheel-type-manager"
+
+// Type assertion to fix TypeScript issue with WheelTypeManager
+const TypedWheelTypeManager = WheelTypeManager as React.ComponentType
 import { SystemIntegrationTest } from "@/components/admin/system-integration-test"
 import { AnnouncementManager } from "@/components/admin/announcement-manager"
 import { isHardcodedAdmin, ensureHardcodedAdminAccess } from "@/lib/hardcoded-admin"
@@ -81,6 +85,7 @@ interface SpinLog {
   result?: string  // Added: for spin result
   userEmail?: string  // Added: for user email
   userName?: string  // Added: for user name
+  participants?: number  // Added: for participant count
 }
 
 interface UserData {
@@ -92,18 +97,21 @@ interface UserData {
   lastActiveAt: Date
   lastActiveDevice?: string
   isActive?: boolean // Re-added: to indicate if user is currently active
+  isImport?: boolean // Added: to indicate if user was imported via bulk upload
 }
 
 interface AdminDashboardData {
   totalUsers: number
   totalSpins: number
   activeNow: number
+  wheelCreated: number
   recentSpinLogs: SpinLog[]
   allUsers: UserData[]
   totalActivities: number
   totalWheels: number
   totalStudentLists: number
   totalLiveSessions: number
+  wheelTypes: { [value: string]: string } // Mapping from wheel type value to label
   systemHealth: {
     databaseConnected: boolean
     authConnected: boolean
@@ -149,6 +157,11 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
   const [newUserRole, setNewUserRole] = useState("participant")
   const [addingUser, setAddingUser] = useState(false)
 
+  // Bulk delete states
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [showUserCheckboxes, setShowUserCheckboxes] = useState(false)
+
   const [isEditUserDialogOpen, setIsEditUserDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<UserData | null>(null)
   const [editingUserRole, setEditingUserRole] = useState("")
@@ -190,29 +203,156 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
   // Profile section state
   const [showProfileSection, setShowProfileSection] = useState(false)
 
-  // Template download function
-  const downloadExcelTemplate = () => {
-    // Create empty template with only headers (no sample data)
-    const headers = ['name', 'email', 'contact']
-    const csvContent = headers.join(',')
+  // Professional Excel template download function with proper formatting
+  const downloadExcelTemplate = async () => {
+    try {
+      console.log('Creating Excel template with role column...')
 
-    // Create and download the file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', 'coby-picks-user-template.csv')
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+      // Import ExcelJS dynamically to avoid bundle issues
+      const ExcelJS = (await import('exceljs')).default
 
-    toast({
-      title: "Template Downloaded",
-      description: "Empty template downloaded. Fill in your user information and upload the file.",
-      duration: 4000,
+      // Create workbook and worksheet using ExcelJS
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('User Template')
+
+      // Define the data with headers including role column
+      const headers = ['First Name', 'Last Name', 'Email', 'Password', 'Role']
+
+      // Add headers
+      worksheet.addRow(headers)
+
+      // Set column widths
+      worksheet.getColumn(1).width = 20 // First Name
+      worksheet.getColumn(2).width = 20 // Last Name
+      worksheet.getColumn(3).width = 35 // Email
+      worksheet.getColumn(4).width = 15 // Password
+      worksheet.getColumn(5).width = 15 // Role
+
+      // Style the header row (row 1)
+      const headerRow = worksheet.getRow(1)
+      headerRow.height = 25
+
+      // Apply maroon background and white text to header cells
+      headerRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+
+      headerRow.getCell(1).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(2).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(3).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(4).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(5).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+
+      headerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' }
+
+
+
+      // Generate and download the file
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'coby_picks_user_template.xlsx'
+      link.click()
+      URL.revokeObjectURL(url)
+
+      toast({
+        title: "Professional Excel Template Downloaded Successfully",
+        description: "Excel template downloaded with maroon headers and role column. Fill in your user data with specific roles (organizer).",
+        duration: 6000,
+      })
+
+    } catch (error) {
+      console.error('Error creating Excel template:', error)
+      toast({
+        title: "Error",
+        description: "Failed to create Excel template. Please try again.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Helper function to parse Excel files
+  const parseExcelFile = async (file: File): Promise<any[]> => {
+    console.log('Starting Excel file parsing...')
+    const ExcelJS = (await import('exceljs')).default
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(await file.arrayBuffer())
+
+    const worksheet = workbook.worksheets[0] // Get first worksheet
+    console.log('Worksheet loaded, name:', worksheet.name)
+    const data: any[] = []
+
+    // Get headers from first row
+    const headerRow = worksheet.getRow(1)
+    const headers: string[] = []
+    headerRow.eachCell((cell, colNumber) => {
+      const cellValue = cell.value?.toString() || ''
+      headers.push(cellValue)
+      console.log(`Header ${colNumber}: "${cellValue}"`)
     })
+    console.log('All headers:', headers)
+
+    // Parse data rows (skip header row)
+    let rowCount = 0
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return // Skip header row
+
+      const rowData: any = {}
+      let hasData = false
+
+      row.eachCell((cell, colNumber) => {
+        const header = headers[colNumber - 1]
+        if (header) {
+          // Handle different cell value types properly
+          let cellValue = ''
+          if (cell.value !== null && cell.value !== undefined) {
+            // Check if it's a rich text value
+            if (typeof cell.value === 'object' && cell.value !== null && 'richText' in cell.value) {
+              const richTextValue = cell.value as any
+              cellValue = richTextValue.richText?.map((rt: any) => rt.text || '').join('') || ''
+            }
+            // Check if it's a hyperlink or formula with text
+            else if (typeof cell.value === 'object' && cell.value !== null && 'text' in cell.value) {
+              const textValue = cell.value as any
+              cellValue = textValue.text || ''
+            }
+            // Check if it's a formula with result
+            else if (typeof cell.value === 'object' && cell.value !== null && 'result' in cell.value) {
+              const formulaValue = cell.value as any
+              cellValue = formulaValue.result !== undefined ? String(formulaValue.result) : ''
+            }
+            // For all other cases, convert to string
+            else {
+              cellValue = String(cell.value)
+            }
+          }
+
+          rowData[header] = cellValue.trim()
+          if (cellValue.trim()) hasData = true
+        }
+      })
+
+      // Only add rows that have some data
+      if (hasData) {
+        data.push(rowData)
+        rowCount++
+        console.log(`Row ${rowNumber} data:`, rowData)
+      }
+    })
+
+    console.log(`Parsed ${rowCount} data rows from Excel file`)
+    return data
   }
 
   // Helper function to format relative time
@@ -257,6 +397,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
           lastActiveAt: lastActiveAt,
           isActive: lastActiveAt ? lastActiveAt > fiveMinutesAgo : false,
           lastActiveDevice: data.lastActiveDevice,
+          isImport: data.isImport || false, // Add import status
         }
       })
       // Filter out admin users from the total count (admins should not be counted as regular users)
@@ -284,6 +425,19 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
       const wheelsSnapshot = await getDocs(collection(db, "wheels"))
       console.log("Total Wheels fetched:", wheelsSnapshot.docs.length)
 
+      // Fetch wheel types for mapping and count
+      const wheelTypesSnapshot = await getDocs(collection(db, "wheelTypes"))
+      const wheelTypesCount = wheelTypesSnapshot.docs.length
+      console.log("Total Wheel Types (presets) fetched:", wheelTypesCount)
+
+      // Create mapping from wheel type value to label
+      const wheelTypesMap: { [value: string]: string } = {}
+      wheelTypesSnapshot.docs.forEach((doc) => {
+        const data = doc.data()
+        wheelTypesMap[data.value] = data.label
+      })
+      console.log("Wheel Types Mapping:", wheelTypesMap)
+
       for (const wheelDoc of wheelsSnapshot.docs) {
         const wheelData = wheelDoc.data()
         const currentSpinCount = wheelData.spinCount || 0
@@ -300,16 +454,75 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
               ? logData.timestamp.toDate()
               : new Date()
 
+          // Create descriptive wheel name showing activity and wheel type
+          const wheelType = wheelData.type || logData.wheelType || 'participant'
+          const wheelTypeLabel = dashboardData?.wheelTypes?.[wheelType] || wheelType
+
+          // Start with the original wheel name but clean up excessive prefixes
+          let activityName = wheelData.name || "Unnamed Wheel"
+
+          // Clean common generic prefixes but keep the custom activity content
+          activityName = activityName
+            .replace(/^Custom(?:\s+Wheel)?\s+Activity\s*/i, '')
+            .replace(/\s*Activity\s+Activity\s*/gi, ' Activity')
+            .replace(/\s*Activity\s*$/i, '')
+            .trim()
+
+          // Create descriptive name showing both activity and wheel type
+          let cleanWheelName = activityName
+
+          // If it's a meaningful custom activity name, show it with wheel type
+          if (cleanWheelName && !cleanWheelName.toLowerCase().includes('unnamed') && !cleanWheelName.toLowerCase().includes('unknown')) {
+            // Format: "Activity Name (Wheel Type)"
+            const typeFormatted = wheelTypeLabel.charAt(0).toUpperCase() + wheelTypeLabel.slice(1).toLowerCase()
+            cleanWheelName = `${cleanWheelName} (${typeFormatted})`
+          } else {
+            // Fallback for generic names - show wheel type prominently
+            cleanWheelName = `${wheelTypeLabel.charAt(0).toUpperCase() + wheelTypeLabel.slice(1).toLowerCase()} Wheel`
+          }
+
+          // Enhanced winner and participant count calculation
+          // For team picker wheels, participants might be stored differently
+          let numberOfWinners = logData.numberOfWinners || 0
+          let participantCount = logData.participantCount || logData.participants?.length || 0
+          let winners = logData.winners || []
+
+          // If winners array is present but numberOfWinners isn't, use array length
+          if (winners.length > 0 && numberOfWinners === 0) {
+            numberOfWinners = winners.length
+          }
+
+          // For team picker wheels, check if we have team data
+          if (wheelData.type === 'team-picker' && logData.teams) {
+            participantCount = logData.teams.length || participantCount
+            // Winners for team pickers might be picked teams
+            if (logData.pickedTeams && logData.pickedTeams.length > 0) {
+              numberOfWinners = logData.pickedTeams.length
+              winners = logData.pickedTeams.map((team: any) => ({ name: team.name || team }))
+            }
+          }
+
+          // Default to wheel participants if available (for saved wheels)
+          if (participantCount === 0 && wheelData.data?.participants?.length > 0) {
+            participantCount = wheelData.data.participants.length
+          }
+
+          // Ensure participant count is at least the number of winners
+          if (participantCount < numberOfWinners) {
+            participantCount = numberOfWinners
+          }
+
           allSpinLogs.push({
             id: logDoc.id,
             timestamp: timestamp,
-            numberOfWinners: logData.numberOfWinners || 0,
-            winners: logData.winners || [],
+            numberOfWinners: numberOfWinners,
+            winners: winners,
+            participants: participantCount, // Add participant count for better tracking
             wheelType: logData.wheelType || "participant",
-            wheelName: wheelData.name || "Unnamed Wheel",
+            wheelName: cleanWheelName,
             userEmail: logData.userEmail || wheelData.userEmail || "Unknown User",
             userName: logData.userName || wheelData.userName || "Unknown",
-            result: logData.result || (logData.winners && logData.winners.length > 0 ? logData.winners.map((w: any) => w.name || w).join(", ") : "No result")
+            result: logData.result || (winners && winners.length > 0 ? winners.map((w: any) => w.name || w).join(", ") : "No result")
           })
         })
       }
@@ -412,12 +625,14 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
         totalUsers,
         totalSpins: allSpinLogs.length,
         activeNow: activeUsersCount,
+        wheelCreated: wheelTypesCount,
         recentSpinLogs,
         allUsers,
         totalActivities,
         totalWheels: wheelsSnapshot.docs.length,
         totalStudentLists,
         totalLiveSessions,
+        wheelTypes: wheelTypesMap,
         systemHealth: {
           databaseConnected: true,
           authConnected: true,
@@ -620,7 +835,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
         user, // Pass admin user information
         {
           duration: parseInt(notificationDuration),
-          priority: notificationPriority as "low" | "medium" | "high" | "urgent",
+          priority: notificationPriority as "low" | "medium" | "urgent",
           type: notificationType as "info" | "warning" | "success" | "urgent"
         }
       )
@@ -754,11 +969,125 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
     }
   }
 
+  // Bulk delete handler for multiple users
+  const handleBulkDeleteUsers = async () => {
+    if (selectedUsers.size === 0) {
+      toast({
+        title: "No Users Selected",
+        description: "Please select users to delete.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const selectedUsersArray = Array.from(selectedUsers)
+    const confirmMessage = `Are you sure you want to permanently delete ${selectedUsersArray.length} user(s)? This action cannot be undone.`
+
+    if (!confirm(confirmMessage)) {
+      console.log(`🛑 Bulk user deletion cancelled`)
+      return
+    }
+
+    setIsBulkDeleting(true)
+    let successCount = 0
+    let errorCount = 0
+
+    try {
+      for (const userId of selectedUsersArray) {
+        const user = sortedAndFilteredUsers.find(u => u.uid === userId)
+        if (!user) continue
+
+        // Check protection for each user
+        const protectionCheck = canDeleteUser(user.email, userId)
+        if (!protectionCheck.canDelete) {
+          logAdminProtection('BULK_USER_DELETE_ATTEMPT', user.email, protectionCheck.reason || 'Protected admin account')
+          errorCount++
+          continue
+        }
+
+        try {
+          await deleteDoc(doc(db, "users", userId))
+          console.log(`✅ Successfully deleted user: ${user.email}`)
+          successCount++
+        } catch (error: any) {
+          console.error(`❌ Error deleting user ${user.email}:`, error)
+          logAdminProtection('BULK_DELETE_ERROR', user.email, `Deletion failed: ${error.message}`)
+          errorCount++
+        }
+      }
+
+      // Clear selection
+      setSelectedUsers(new Set())
+
+      // Show results
+      if (successCount > 0) {
+        toast({
+          title: "Bulk Delete Completed",
+          description: `Successfully deleted ${successCount} user(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}.`,
+        })
+
+        // Refresh data
+        await fetchAdminData()
+      } else {
+        toast({
+          title: "Bulk Delete Failed",
+          description: `Failed to delete any users. Check the console for details.`,
+          variant: "destructive",
+        })
+      }
+    } catch (error: any) {
+      console.error("Error in bulk delete:", error)
+      toast({
+        title: "Bulk Delete Error",
+        description: error.message || "An unexpected error occurred during bulk delete.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsBulkDeleting(false)
+    }
+  }
+
+  // Handle select all checkbox
+  const handleSelectAllUsers = (checked: boolean) => {
+    if (checked) {
+      const allUserIds = new Set(sortedAndFilteredUsers
+        .filter(user => user.role !== "admin") // Don't allow selecting admin users
+        .map(user => user.uid))
+      setSelectedUsers(allUserIds)
+    } else {
+      setSelectedUsers(new Set())
+    }
+  }
+
+  // Handle individual user selection
+  const handleSelectUser = (userId: string, checked: boolean) => {
+    const newSelected = new Set(selectedUsers)
+    if (checked) {
+      newSelected.add(userId)
+    } else {
+      newSelected.delete(userId)
+    }
+    setSelectedUsers(newSelected)
+  }
+
+  // Toggle user selection mode
+  const toggleUserSelectMode = () => {
+    if (showUserCheckboxes) {
+      // Exiting select mode, clear selections
+      setSelectedUsers(new Set())
+    }
+    setShowUserCheckboxes(!showUserCheckboxes)
+  }
+
   // Client-side fallback removed to prevent authentication redirection issues
   // All user creation now happens server-side via Firebase Admin SDK
 
   const handleAddUser = async () => {
-    if (!newUserFirstName || !newUserLastName || !newUserEmail || !newUserPassword || !newUserRole) {
+    const trimmedFirst = newUserFirstName.trim()
+    const trimmedLast = newUserLastName.trim()
+    const trimmedEmail = newUserEmail.trim().toLowerCase()
+
+    if (!trimmedFirst || !trimmedLast || !trimmedEmail || !newUserPassword || !newUserRole) {
       toast({
         title: "Missing Information",
         description: "Please fill in all fields (First Name, Last Name, Email, Password, Role).",
@@ -767,10 +1096,20 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
       return
     }
 
+    // Validate password length
+    if (newUserPassword.length < 7) {
+      toast({
+        title: "Password Too Short",
+        description: "Password must be at least 7 characters long.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setAddingUser(true)
     try {
       // Combine first and last name for full name
-      const fullName = `${newUserFirstName.trim()} ${newUserLastName.trim()}`
+      const fullName = `${trimmedFirst} ${trimmedLast}`
 
       // Using Firebase Admin SDK for real user creation
       const response = await fetch('/api/admin/create-user', {
@@ -780,10 +1119,12 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
         },
         body: JSON.stringify({
           name: fullName,
-          email: newUserEmail,
+          email: trimmedEmail,
           password: newUserPassword,
           role: newUserRole,
           adminEmail: user.email,
+          needsPasswordReset: true, // Flag that they need to reset password
+          isImport: false, // Individual user creation
         }),
       })
 
@@ -806,49 +1147,55 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
         throw new Error(result.error || 'Failed to create user')
       }
       
+      // Send welcome email asynchronously (non-blocking)
+      sendUserWelcomeEmail(
+        newUserEmail,
+        fullName,
+        newUserPassword,
+        newUserRole,
+        user.email || "admin@cobypicks.com"
+      ).then((emailResult) => {
+        if (!emailResult.success) {
+          console.warn(`⚠️ Failed to send welcome email for ${newUserEmail}: ${emailResult.message}`)
+        }
+      }).catch((emailError) => {
+        console.warn(`⚠️ Error sending welcome email for ${newUserEmail}:`, emailError)
+      })
+
       toast({
         title: "User Added Successfully",
-        description: `User ${newUserEmail} has been created with role ${newUserRole}. Refreshing user list...`,
+        description: `User ${trimmedEmail} has been created with role ${newUserRole}. Welcome email sent with login credentials. Refreshing user list...`,
       })
-      
-      // IMPORTANT: Immediately ensure we stay on user management
-      setActiveView("user-management")
-      
-      // Show loading state while refreshing
-      setLoading(true)
-      
-      try {
-        // Real mode: fetch actual data from Firebase database
-        console.log('🔄 Refreshing admin data to show new user...')
-        
-        // Small delay to ensure the user document is fully written to Firestore
-        await new Promise(resolve => setTimeout(resolve, 1000))
-        
-        // Refresh the admin data
-        await fetchAdminData()
-        
-        // Ensure we stay on user management view
-        setActiveView("user-management")
-        
-        // Show confirmation that the list was updated
-        toast({
-          title: "User Added to List",
-          description: `✅ ${newUserEmail} is now visible in the user management table.`,
-          duration: 3000,
-        })
-        
-        console.log('✅ User management view refreshed with new user')
-      } finally {
-        setLoading(false)
-      }
 
-      // Clear form and close dialog
+      // Keep the UI snappy: close dialog and clear form immediately
+      setIsAddUserDialogOpen(false)
       setNewUserFirstName("")
       setNewUserLastName("")
       setNewUserEmail("")
       setNewUserPassword("")
       setNewUserRole("participant")
-      setIsAddUserDialogOpen(false)
+
+      // Stay on user management view
+      setActiveView("user-management")
+
+      // Refresh in background to keep button responsive
+      ;(async () => {
+        setLoading(true)
+        try {
+          await fetchAdminData()
+          setActiveView("user-management")
+          toast({
+            title: "User Added to List",
+            description: `✅ ${trimmedEmail} is now visible in the user management table.`,
+            duration: 3000,
+          })
+          console.log('✅ User management view refreshed with new user')
+        } catch (refreshError) {
+          console.error('Error refreshing admin data:', refreshError)
+        } finally {
+          setLoading(false)
+        }
+      })()
 
     } catch (error: any) {
       console.error("Error adding user:", error)
@@ -917,7 +1264,10 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
   }
 
   const handleFileUpload = async () => {
+    console.log('Starting fast, optimized bulk upload process...')
+
     if (!uploadFile) {
+      console.log('No file selected')
       toast({
         title: "No File Selected",
         description: "Please select a CSV or Excel file to upload.",
@@ -926,260 +1276,354 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
       return
     }
 
+    // Fast file size check (5MB limit)
+    const maxSize = 5 * 1024 * 1024 // 5MB
+    if (uploadFile.size > maxSize) {
+      toast({
+        title: "File Too Large",
+        description: "Please upload a file smaller than 5MB.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    console.log('File selected:', uploadFile.name, uploadFile.size, 'bytes')
     setUploadingFile(true)
+
     try {
-      // Store current admin user to prevent auth state confusion during bulk creation
-      const currentAdminUser = user
-      
-      // Parse CSV file
-      Papa.parse(uploadFile, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results: ParseResult<any>) => {
-          try {
-            const data = results.data as any[]
-            setParsedData(data)
+      // Pre-validation: Determine file type
+      const fileName = uploadFile.name.toLowerCase()
+      if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+        throw new Error('Unsupported file format. Please upload a CSV or Excel file.')
+      }
 
-            if (data.length === 0) {
-              toast({
-                title: "Empty File",
-                description: "The uploaded file contains no data.",
-                variant: "destructive",
-              })
-              return
-            }
-
-            // Validate required columns
-            const requiredColumns = ['name', 'email']
-            const headers = Object.keys(data[0] || {})
-            const missingColumns = requiredColumns.filter(col => 
-              !headers.some(header => header.toLowerCase().includes(col.toLowerCase()))
-            )
-
-            if (missingColumns.length > 0) {
-              toast({
-                title: "Missing Required Columns",
-                description: `The file must contain columns for: ${missingColumns.join(', ')}`,
-                variant: "destructive",
-              })
-              return
-            }
-
-            // Process each row and create user accounts
-            let successCount = 0
-            let errorCount = 0
-            let duplicateCount = 0
-            const errors: string[] = []
-            const duplicates: string[] = []
-
-            for (const row of data) {
-              // Extract data from row (handle different column name variations)
-              const name = row.name || row.Name || row.fullname || row['Full Name'] || row['full name'] || ''
-              const email = row.email || row.Email || row['email address'] || row['Email Address'] || ''
-              const contactNumber = row.contact || row.Contact || row['contact number'] || row['Contact Number'] || row.phone || row.Phone || ''
-
-              if (!name.trim() || !email.trim()) {
-                errorCount++
-                errors.push(`Row with email '${email}' is missing required name or email`)
-                continue
-              }
-
-              try {
-                // Generate a temporary password (users will need to reset it)
-                const tempPassword = 'TempPass123!'
-
-                // Use server-side API to create user without affecting current session
-                const response = await fetch('/api/admin/create-user', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    name: name.trim(),
-                    email: email.trim(),
-                    password: tempPassword,
-                    role: "participant", // Default role for uploaded users
-                    adminEmail: user.email,
-                    contactNumber: contactNumber.trim() || null,
-                    needsPasswordReset: true, // Flag that they need to reset password
-                    isImport: true, // Flag this as a bulk import
-                  }),
-                })
-
-                const result = await response.json()
-
-                if (!response.ok) {
-                  if (response.status === 409) {
-                    // Handle duplicate user (409 Conflict)
-                    duplicateCount++
-                    duplicates.push(email.trim())
-                  } else {
-                    throw new Error(result.error || 'Failed to create user')
-                  }
+      // Fast parsing phase
+      let rawData: any[] = []
+      try {
+        if (fileName.endsWith('.csv')) {
+          rawData = await new Promise((resolve, reject) => {
+            Papa.parse(uploadFile, {
+              header: true,
+              skipEmptyLines: true,
+              complete: (results: ParseResult<any>) => {
+                if (results.errors && results.errors.length > 0) {
+                  reject(new Error(`CSV parsing error: ${results.errors[0].message}`))
                 } else {
-                  successCount++
+                  resolve(results.data as any[])
                 }
-                
-              } catch (error: any) {
-                errorCount++
-                const errorMessage = error.message || 'Unknown error'
-                
-                if (errorMessage.includes('already exists')) {
-                  duplicateCount++
-                  duplicates.push(email)
-                } else if (errorMessage.includes('invalid email')) {
-                  errors.push(`Invalid email format: ${email}`)
-                } else if (errorMessage.includes('weak password') || errorMessage.includes('too weak')) {
-                  errors.push(`Weak password for ${email}`)
-                } else {
-                  errors.push(`Error creating user ${email}: ${errorMessage}`)
-                }
-              }
-            }
-
-            // Show results with better duplicate handling
-            console.log('Upload processing complete:', { successCount, duplicateCount, errorCount, totalRows: data.length })
-            
-            if (successCount > 0) {
-              // Some users were successfully created
-              setActiveView("user-management")
-              
-              let message = `${successCount} users successfully imported`
-              if (duplicateCount > 0) {
-                message += `, ${duplicateCount} users already existed (skipped)`
-              }
-              if (errorCount > 0) {
-                message += `, ${errorCount} errors occurred`
-              }
-              
-              toast({
-                title: "Import Started",
-                description: `${message}. Please wait while we refresh the user list...`,
-                duration: 4000,
-              })
-
-              // IMPORTANT: Ensure admin stays logged in after bulk user creation
-              if (auth.currentUser?.uid !== currentAdminUser?.uid) {
-                console.log("🔄 Admin session changed during bulk user creation, maintaining admin session")
-              }
-
-              // Show loading state while refreshing
-              setLoading(true)
-
-              try {
-                // Refresh admin data to show new users immediately
-                console.log(`🔄 Refreshing admin data to show ${successCount} new users...`)
-                
-                // Small delay to ensure all user documents are fully written to Firestore
-                await new Promise(resolve => setTimeout(resolve, 3000))
-                
-                // Refresh the admin data
-                await fetchAdminData()
-
-                // Ensure we stay on user management view
-                setActiveView("user-management")
-                
-                // Show final confirmation that the list was updated
-                let finalMessage = `✅ ${successCount} users successfully imported`
-                if (duplicateCount > 0) {
-                  finalMessage += `. ${duplicateCount} existing users were skipped.`
-                } else {
-                  finalMessage += ` and added to the user management table.`
-                }
-                
-                toast({
-                  title: "Import Complete!",
-                  description: finalMessage,
-                  duration: 5000,
-                })
-                
-                console.log('✅ User management view refreshed with new imported users')
-              } finally {
-                setLoading(false)
-              }
-            } else if (duplicateCount > 0) {
-              // All users were duplicates, no new users created
-              toast({
-                title: "All Users Already Exist",
-                description: `All ${duplicateCount} users in the CSV file already exist in the system. No new users were created.`,
-                variant: "default",
-              })
-              console.log(`📝 All ${duplicateCount} users already exist, no action needed`)
-            } else if (errorCount > 0) {
-              // Only errors, no successes or duplicates
-              console.error('All users failed to create due to errors:', errors)
-            }
-
-            // Handle remaining errors (not duplicates which are already handled above)
-            if (errorCount > 0) {
-              console.log('Upload summary:', { successCount, duplicateCount, errorCount, errors, duplicates })
-              
-              // Real errors occurred (excluding duplicates which are handled above)
-              const configErrors = errors.filter(error => 
-                error.includes('Firebase Admin SDK Configuration Required') ||
-                error.includes('Missing required environment variables') ||
-                error.includes('placeholder values')
-              )
-              
-              if (configErrors.length === errors.length) {
-                // All errors are configuration issues
-                toast({
-                  title: "Firebase Admin SDK Setup Required",
-                  description: `All ${errorCount} users failed to create due to missing Firebase configuration. Please check QUICK_SETUP.md and update your .env.local file.`,
-                  variant: "destructive",
-                })
-                console.error("🚫 All upload errors are due to Firebase Admin SDK configuration:")
-                console.error("1. Open .env.local file in web1 folder")
-                console.error("2. Replace placeholder values with real Firebase credentials")
-                console.error("3. Follow QUICK_SETUP.md for step-by-step instructions")
-                console.error("4. Visit http://localhost:3000/api/admin/config-check to verify setup")
-              } else {
-                // Mixed errors or other issues
-                let errorMessage = `${errorCount} error(s) occurred`
-                if (duplicateCount > 0) {
-                  errorMessage += ` (${duplicateCount} duplicates were skipped)`
-                }
-                
-                toast({
-                  title: errorMessage,
-                  description: errors.slice(0, 2).join('; ') + (errors.length > 2 ? '...' : ''),
-                  variant: "destructive",
-                })
-              }
-            }
-
-            // Reset file input
-            setUploadFile(null)
-            setParsedData([])
-            const fileInput = document.getElementById('file-upload') as HTMLInputElement
-            if (fileInput) fileInput.value = ''
-
-          } catch (parseError: any) {
-            toast({
-              title: "Processing Error",
-              description: parseError.message,
-              variant: "destructive",
+              },
+              error: (error: any) => reject(new Error(`CSV parsing error: ${error.message}`))
             })
-          } finally {
-            setUploadingFile(false)
+          })
+        } else {
+          rawData = await parseExcelFile(uploadFile)
+        }
+      } catch (parseError: any) {
+        throw new Error(`File parsing failed: ${parseError?.message || 'Unknown parsing error'}`)
+      }
+
+      if (rawData.length === 0) {
+        toast({
+          title: "Empty File",
+          description: "The uploaded file contains no data.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Fast validation phase - check headers first
+      const headers = Object.keys(rawData[0] || {})
+      const requiredColumns = ['firstname', 'lastname', 'email', 'password', 'role']
+
+      // Flexible column matching
+      const findColumnName = (possibleNames: string[]): string | null => {
+        for (const name of possibleNames) {
+          const found = headers.find(header =>
+            header.toLowerCase().includes(name.toLowerCase()) ||
+            header.toLowerCase().replace(' ', '') === name.toLowerCase() ||
+            header.toLowerCase() === name.toLowerCase()
+          )
+          if (found) return found
+        }
+        return null
+      }
+
+      const columnMapping = {
+        firstname: findColumnName(['firstname', 'firstName', 'First Name', 'first name', 'FirstName']),
+        lastname: findColumnName(['lastname', 'lastName', 'Last Name', 'last name', 'LastName']),
+        email: findColumnName(['email', 'Email', 'email address', 'Email Address']),
+        password: findColumnName(['password', 'Password']),
+        role: findColumnName(['role', 'Role', 'userrole', 'UserRole', 'user_role', 'User Role'])
+      }
+
+      console.log('Column mapping:', columnMapping)
+
+      const missingColumns = requiredColumns.filter(col => !columnMapping[col as keyof typeof columnMapping])
+      if (missingColumns.length > 0) {
+        toast({
+          title: "Missing Required Columns",
+          description: `The file must contain columns for: ${missingColumns.join(', ')}. Found columns: ${headers.join(', ')}`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Fast filtering: Remove invalid/empty rows and validate required fields
+      const validRows = rawData.filter((row, index) => {
+        const getColumnValue = (columnName: string): string => {
+          const mappedColumn = columnMapping[columnName as keyof typeof columnMapping]
+          if (mappedColumn && row[mappedColumn] !== undefined && row[mappedColumn] !== null) {
+            return String(row[mappedColumn]).trim()
           }
-        },
-        error: (error: any) => {
-          setUploadingFile(false)
+          return ''
+        }
+
+        const firstname = getColumnValue('firstname')
+        const lastname = getColumnValue('lastname')
+        const email = getColumnValue('email')
+        const password = getColumnValue('password')
+
+        // Basic validation checks
+        if (!firstname || !lastname || !email || password.length < 6) {
+          console.log(`Skipping invalid row ${index + 1}: incomplete data`)
+          return false
+        }
+
+        // Fast email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(email)) {
+          console.log(`Skipping row ${index + 1}: invalid email ${email}`)
+          return false
+        }
+
+        return true
+      })
+
+      const totalValidRows = validRows.length
+      console.log(`Found ${totalValidRows} valid rows out of ${rawData.length} total rows`)
+
+      if (totalValidRows === 0) {
+        toast({
+          title: "No Valid Data",
+          description: "The file contains no valid user data. Check your column headers and data format.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Success counter and batch processing
+      let successCount = 0
+      let errorCount = 0
+      let duplicateCount = 0
+      const errors: string[] = []
+      const duplicates: string[] = []
+
+      // Create user accounts in optimized batches
+      const batchSize = 10 // Process 10 users at a time
+      const batches = []
+
+      for (let i = 0; i < validRows.length; i += batchSize) {
+        batches.push(validRows.slice(i, i + batchSize))
+      }
+
+      console.log(`Processing ${batches.length} batches of up to ${batchSize} users each...`)
+
+      // Process batches concurrently for better performance
+      for (const batch of batches) {
+        const batchPromises = batch.map(async (row) => {
+          const getColumnValue = (columnName: string): string => {
+            const mappedColumn = columnMapping[columnName as keyof typeof columnMapping]
+            return mappedColumn ? String(row[mappedColumn]).trim() : ''
+          }
+
+          const firstname = getColumnValue('firstname')
+          const lastname = getColumnValue('lastname')
+          const email = getColumnValue('email')
+          const password = getColumnValue('password')
+          const csvRole = getColumnValue('role').toLowerCase()
+
+          // Validate role from CSV - allow both 'organizer' and 'participant' (case insensitive)
+          const normalizedRole = csvRole.toLowerCase().trim()
+          const validRole = normalizedRole === 'organizer' ? 'organizer' :
+                           normalizedRole === 'participant' ? 'participant' : 'organizer' // Default to organizer if invalid
+
+          try {
+            // Use the role from CSV file
+            const userData = {
+              name: `${firstname} ${lastname}`,
+              email: email.toLowerCase().trim(), // Normalize email to lowercase
+              password: password.trim(),
+              role: validRole, // Use role from CSV file
+              adminEmail: user.email,
+              needsPasswordReset: true,
+              isImport: true,
+            }
+
+            const response = await fetch('/api/admin/create-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(userData),
+            })
+
+            const result = await response.json()
+
+            if (!response.ok) {
+              if (response.status === 409) {
+                duplicateCount++
+                duplicates.push(email)
+              } else {
+                throw new Error(result.error || 'Failed to create user')
+              }
+            } else {
+              successCount++
+              // Return success for email processing
+              return { email: email, firstname: firstname, lastname: lastname, success: true }
+            }
+
+          } catch (error: any) {
+            errorCount++
+            const errorMessage = error.message || 'Unknown error'
+
+            if (errorMessage.includes('already exists') || errorMessage.includes('409')) {
+              duplicateCount++
+              duplicates.push(email)
+            } else {
+              errors.push(`Error creating user: ${errorMessage}`)
+            }
+
+            return { email: email, success: false, error: errorMessage }
+          }
+        })
+
+        // Wait for batch to complete
+        const batchResults = await Promise.all(batchPromises)
+        console.log(`Completed batch with ${batchResults.filter(r => r?.success).length} successes`)
+      }
+
+      // Send emails in non-blocking parallel fashion for successful users
+      setParsedData(validRows)
+
+      console.log('Upload processing complete:', { successCount, duplicateCount, errorCount, totalRows: totalValidRows })
+
+      if (successCount > 0) {
+        // Some users were successfully created
+        setActiveView("user-management")
+
+        let message = `${successCount} users successfully imported`
+        if (duplicateCount > 0) {
+          message += `, ${duplicateCount} users already existed (skipped)`
+        }
+        if (errorCount > 0) {
+          message += `, ${errorCount} errors occurred`
+        }
+
+        toast({
+          title: "Import Completed",
+          description: `${message}. Users are now available in the system.`,
+          duration: 4000,
+        })
+
+        // Show loading state while refreshing
+        setLoading(true)
+
+        try {
+          // Refresh admin data to show new users immediately
+          console.log(`🔄 Refreshing admin data to show ${successCount} new users...`)
+
+          // Brief delay to ensure user documents are written
+          await new Promise(resolve => setTimeout(resolve, 100))
+
+          // Refresh the admin data
+          await fetchAdminData()
+
+          // Ensure we stay on user management view
+          setActiveView("user-management")
+
+          // Show final confirmation that the list was updated
+          let finalMessage = `✅ ${successCount} users successfully imported`
+          if (duplicateCount > 0) {
+            finalMessage += `. ${duplicateCount} existing users were skipped.`
+          } else {
+            finalMessage += ` and added to the user management table.`
+          }
+
           toast({
-            title: "File Parse Error",
-            description: error.message,
+            title: "Import Complete!",
+            description: finalMessage,
+            duration: 5000,
+          })
+
+          console.log('✅ User management view refreshed with new imported users')
+        } finally {
+          setLoading(false)
+        }
+      } else if (duplicateCount > 0) {
+        // All users were duplicates, no new users created
+        toast({
+          title: "All Users Already Exist",
+          description: `All ${duplicateCount} users in the file already exist in the system. No new users were created.`,
+          variant: "default",
+        })
+        console.log(`📝 All ${duplicateCount} users already exist, no action needed`)
+      } else if (errorCount > 0) {
+        // Only errors, no successes or duplicates
+        console.error('All users failed to create due to errors:', errors)
+      }
+
+      // Handle remaining errors (not duplicates which are already handled above)
+      if (errorCount > 0) {
+        console.log('Upload summary:', { successCount, duplicateCount, errorCount, errors, duplicates })
+
+        // Real errors occurred (excluding duplicates which are handled above)
+        const configErrors = errors.filter(error =>
+          error.includes('Firebase Admin SDK Configuration Required') ||
+          error.includes('Missing required environment variables') ||
+          error.includes('placeholder values')
+        )
+
+        if (configErrors.length === errors.length) {
+          // All errors are configuration issues
+          toast({
+            title: "Firebase Admin SDK Setup Required",
+            description: `All ${errorCount} users failed to create due to missing Firebase configuration. Please check QUICK_SETUP.md and update your .env.local file.`,
+            variant: "destructive",
+          })
+          console.error("🚫 All upload errors are due to Firebase Admin SDK configuration:")
+          console.error("1. Open .env.local file in web1 folder")
+          console.error("2. Replace placeholder values with real Firebase credentials")
+          console.error("3. Follow QUICK_SETUP.md for step-by-step instructions")
+          console.error("4. Visit http://localhost:3000/api/admin/config-check to verify setup")
+        } else {
+          // Mixed errors or other issues
+          let errorMessage = `${errorCount} error(s) occurred`
+          if (duplicateCount > 0) {
+            errorMessage += ` (${duplicateCount} duplicates were skipped)`
+          }
+
+          toast({
+            title: errorMessage,
+            description: errors.slice(0, 2).join('; ') + (errors.length > 2 ? '...' : ''),
             variant: "destructive",
           })
         }
-      })
+      }
+
+      // Reset file input
+      setUploadFile(null)
+      setParsedData([])
+      const fileInput = document.getElementById('file-upload') as HTMLInputElement
+      if (fileInput) fileInput.value = ''
+
     } catch (error: any) {
       setUploadingFile(false)
       toast({
         title: "Upload Error",
-        description: error.message,
+        description: error.message || "An unexpected error occurred during file upload.",
         variant: "destructive",
       })
+    } finally {
+      // Always reset uploading state
+      setUploadingFile(false)
     }
   }
 
@@ -1483,30 +1927,24 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                 </CardContent>
               </Card>
 
-              {/* Real-time Active Now card */}
-              <Card className="shadow-md border-l-4 border-l-green-500">
+              {/* Wheel Created card */}
+              <Card className="shadow-md border-l-4 border-l-blue-500">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                    Active Now
-                    {realTimeConnected ? (
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                    ) : (
-                      <div className="w-2 h-2 bg-gray-400 rounded-full" />
-                    )}
+                    Wheel Created
+                    <div className="w-2 h-2 bg-blue-500 rounded-full" />
                   </CardTitle>
                   <CardDescription className="text-sm text-muted-foreground">
-                    {realTimeConnected ? "Live users (last 5 minutes)" : "Users currently active"}
+                    Total wheel type presets available
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-4xl font-bold text-green-600">
-                    {realTimeConnected ? activeUsers.length : (dashboardData?.activeNow || 0)}
+                  <div className="text-4xl font-bold text-blue-600">
+                    {dashboardData?.wheelCreated || 0}
                   </div>
-                  {realTimeConnected && activeUsers.length > 0 && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Last active: {activeUsers[0]?.lastActiveAt?.toLocaleTimeString() || "Unknown"}
-                    </div>
-                  )}
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Wheel type presets managed
+                  </div>
                 </CardContent>
               </Card>
 
@@ -1623,127 +2061,9 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                   </Button>
                 </div>
 
-                {/* User Spin Activity Details */}
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-gray-50">
-                        <TableHead className="font-semibold text-gray-700">User</TableHead>
-                        <TableHead className="font-semibold text-gray-700">Wheel Type</TableHead>
-                        <TableHead className="font-semibold text-gray-700">Activity</TableHead>
-                        <TableHead className="font-semibold text-gray-700">Session Type</TableHead>
-                        <TableHead className="font-semibold text-gray-700">Last Activity</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredAndSortedSpinLogs.length > 0 ? (
-                        filteredAndSortedSpinLogs.slice(0, 10).map((log) => (
-                          <TableRow key={log.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-semibold text-swu-red">
-                                  {log.userName || "Unknown User"}
-                                </span>
-                                <span className="text-xs text-gray-500">
-                                  {log.userEmail || "No email"}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${
-                                  log.wheelType === 'participant' ? 'border-blue-300 text-blue-700' :
-                                  log.wheelType === 'organizer' ? 'border-green-300 text-green-700' :
-                                  log.wheelType === 'live' ? 'border-red-300 text-red-700' :
-                                  'border-gray-300 text-gray-700'
-                                }`}
-                              >
-                                {log.wheelType === 'participant' ? '👥 Participant' :
-                                 log.wheelType === 'organizer' ? '👤 Organizer' :
-                                 log.wheelType === 'live' ? '🔴 Live Session' :
-                                 log.wheelType || 'Regular'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              <div className="flex flex-col">
-                                <span className="font-medium">{log.wheelName || "Unnamed Wheel"}</span>
-                                <span className="text-xs text-gray-500">
-                                  {log.numberOfWinners || 0} winner{log.numberOfWinners !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="secondary"
-                                className={`text-xs ${
-                                  log.wheelType === 'live' ? 'bg-red-100 text-red-800' :
-                                  log.wheelType === 'participant' ? 'bg-blue-100 text-blue-800' :
-                                  log.wheelType === 'organizer' ? 'bg-green-100 text-green-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}
-                              >
-                                {log.wheelType === 'live' ? '🎯 Live Draw' :
-                                 log.wheelType === 'participant' ? '🎲 Participant Spin' :
-                                 log.wheelType === 'organizer' ? '⚙️ Organizer Spin' :
-                                 '🎡 Regular Spin'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">
-                              <div className="flex flex-col">
-                                <span>{log.timestamp.toLocaleDateString()}</span>
-                                <span className="text-xs">{log.timestamp.toLocaleTimeString()}</span>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={5} className="text-center py-8 text-gray-500">
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="text-2xl">🎯</div>
-                              <div className="text-sm">No spin activity found</div>
-                              <div className="text-xs">Users haven't used any spin wheels yet</div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
 
-                {/* Spin Categories Breakdown */}
-                {totalSpinLogs > 0 && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <h4 className="text-sm font-semibold text-gray-800 mb-3">📊 Spin Activity by Category</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {(() => {
-                        const categoryStats = filteredAndSortedSpinLogs.reduce((acc, log) => {
-                          const category = log.wheelType || 'regular';
-                          acc[category] = (acc[category] || 0) + 1;
-                          return acc;
-                        }, {} as Record<string, number>);
 
-                        const topCategories = Object.entries(categoryStats)
-                          .sort(([,a], [,b]) => b - a)
-                          .slice(0, 4);
 
-                        return topCategories.map(([category, count]) => (
-                          <div key={category} className="text-center">
-                            <div className="text-lg font-bold text-gray-700">{count}</div>
-                            <div className="text-xs text-gray-600 capitalize">
-                              {category === 'participant' ? '👥 Participants' :
-                               category === 'organizer' ? '👤 Organizers' :
-                               category === 'live' ? '🔴 Live Sessions' :
-                               category === 'regular' ? '🎯 Regular Spins' :
-                               category}
-                            </div>
-                          </div>
-                        ));
-                      })()}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {currentSpinLogs.length === 0 ? (
@@ -1762,6 +2082,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                           <TableHead className="w-[120px]">Type</TableHead>
                           <TableHead className="w-[150px]">Date/Time</TableHead>
                           <TableHead className="w-[100px]"># Winners</TableHead>
+                          <TableHead className="w-[120px]"># Joined</TableHead>
                           <TableHead>Results/Winners</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1790,7 +2111,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className="text-xs">
-                                {log.wheelType || "Unknown"}
+                                {dashboardData?.wheelTypes?.[log.wheelType || ''] || log.wheelType || "Unknown"}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-sm">
@@ -1806,13 +2127,18 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                 {log.numberOfWinners || log.winners?.length || 0}
                               </Badge>
                             </TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="outline" className="text-xs">
+                                {log.participants || log.numberOfWinners || log.winners?.length || 0}
+                              </Badge>
+                            </TableCell>
                             <TableCell>
                               <div className="max-w-[300px]">
                                 {log.winners && log.winners.length > 0 ? (
                                   <div className="flex flex-wrap gap-1">
                                     {log.winners.slice(0, 3).map((winner, index) => (
                                       <Badge key={index} variant="default" className="text-xs bg-green-100 text-green-800">
-                                        {winner.name}
+                                        {typeof winner === 'string' ? winner : winner.name}
                                       </Badge>
                                     ))}
                                     {log.winners.length > 3 && (
@@ -1896,9 +2222,22 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
             <Card className="shadow-md p-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                 <CardDescription className="text-muted-foreground">
-                
                 </CardDescription>
                 <div className="flex flex-col md:flex-row items-start md:items-center gap-2">
+                  {selectedUsers.size > 0 && (
+                    <Button
+                      onClick={handleBulkDeleteUsers}
+                      disabled={isBulkDeleting}
+                      variant="destructive"
+                      size="sm"
+                    >
+                      {isBulkDeleting ? (
+                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
                   <Input
                     placeholder="Search by email..."
                     value={emailFilter}
@@ -1911,7 +2250,6 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Roles</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="organizer">Organizer</SelectItem>
                       <SelectItem value="participant">Participant</SelectItem>
                     </SelectContent>
@@ -1927,6 +2265,13 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                       <SelectItem value="50">50 per page</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    onClick={toggleUserSelectMode}
+                    variant={showUserCheckboxes ? "default" : "outline"}
+                    size="sm"
+                  >
+                    {showUserCheckboxes ? "Cancel" : "Select"}
+                  </Button>
                   <Dialog open={isAddUserDialogOpen} onOpenChange={setIsAddUserDialogOpen}>
                     <DialogTrigger asChild>
                       <Button size="sm" className="gap-1 bg-swu-red hover:bg-swu-red/90 text-white">
@@ -1936,17 +2281,6 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
                       <DialogHeader>
-                        <DialogTitle className="text-swu-red">Add Users - Individual & Bulk Upload</DialogTitle>
-                        <DialogDescription>
-                          Create new user accounts individually or upload multiple users from Excel/CSV files.
-                          <br />
-                          <span className="text-xs text-green-600 mt-1 block">
-                            ✓ Server-side creation - admin session preserved
-                          </span>
-                          <span className="text-xs text-blue-600 mt-1 block">
-                            ℹ️ All users will be saved to Firebase database
-                          </span>
-                        </DialogDescription>
                       </DialogHeader>
 
                       {/* Excel-like Tabbed Interface */}
@@ -1961,7 +2295,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                               }`}
                               onClick={() => setActiveUserTab('individual')}
                             >
-                              👤 Individual User
+                              👤 Individual User Creation
                             </button>
                             <button
                               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -1971,7 +2305,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                               }`}
                               onClick={() => setActiveUserTab('bulk')}
                             >
-                              📊 Bulk Upload (Excel/CSV)
+                              📊 Bulk Upload System (Excel/CSV)
                             </button>
                           </div>
                         </div>
@@ -1979,9 +2313,9 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                         {/* Individual User Tab */}
                         {activeUserTab === 'individual' && (
                           <div className="space-y-4">
-                            <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                              <h4 className="text-sm font-medium text-blue-800 mb-2">📝 Individual User Creation</h4>
-                              <p className="text-xs text-blue-600">Create a single user account with manual data entry</p>
+                            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                              <h4 className="text-sm font-semibold text-blue-800 mb-2">📝 Individual User Account Creation</h4>
+                              <p className="text-sm text-blue-700">Create a single user account through manual data entry with comprehensive validation</p>
                             </div>
 
                             <div className="grid gap-4">
@@ -2028,13 +2362,13 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                 <Input
                                   id="new-user-password"
                                   type="password"
-                                  placeholder="Enter temporary password"
+                                  placeholder="Enter temporary password (minimum 7 characters)"
                                   value={newUserPassword}
                                   onChange={(e) => setNewUserPassword(e.target.value)}
                                   className="border-gray-300 focus:border-swu-red"
                                   required
                                 />
-                                <p className="text-xs text-gray-500">User will be prompted to change password on first login</p>
+                                <p className="text-xs text-gray-500">User will receive welcome email with login credentials and be prompted to change password and add recovery email on first login. Password must be at least 7 characters long.</p>
                               </div>
                               <div className="grid gap-2">
                                 <Label htmlFor="new-user-role" className="text-sm font-medium">Role *</Label>
@@ -2063,37 +2397,47 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                           <div className="space-y-4">
                             <div className="bg-green-50 p-3 rounded-lg border border-green-200">
                               <h4 className="text-sm font-medium text-green-800 mb-2">📊 Bulk User Upload</h4>
-                              <p className="text-xs text-green-600">Upload multiple users from Excel or CSV files with Excel-like data sections</p>
+                              <p className="text-xs text-green-600">Upload multiple users from CSV files with structured data columns</p>
                             </div>
 
                             {/* Excel-like Data Sections */}
                             <div className="space-y-4">
-                              <div className="border rounded-lg p-4 bg-gray-50">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h5 className="text-sm font-medium text-gray-700">📋 Required Data Format</h5>
-                                  <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                                    💡 Download template above for easy setup
-                                  </span>
+                            <div className="border rounded-lg p-4 bg-gray-50">
+                              <div className="flex items-center justify-between mb-3">
+                                <h5 className="text-sm font-medium text-gray-700">📋 Required Data Format</h5>
+                                <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                  💡 Download template above for easy setup
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-xs">
+                                <div className="bg-white p-3 rounded border">
+                                  <div className="font-medium text-swu-red mb-1">Column A: First Name</div>
+                                  <div className="text-gray-600">First name (required)</div>
+                                  <div className="text-gray-500 mt-1">Example: John</div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="font-medium text-swu-red mb-1">Column A: Name</div>
-                                    <div className="text-gray-600">Full name (required)</div>
-                                    <div className="text-gray-500 mt-1">Example: John Doe</div>
-                                  </div>
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="font-medium text-swu-red mb-1">Column B: Email</div>
-                                    <div className="text-gray-600">Email address (required)</div>
-                                    <div className="text-gray-500 mt-1">Example: john@example.com</div>
-                                  </div>
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="font-medium text-blue-600 mb-1">Column C: Contact (Optional)</div>
-                                    <div className="text-gray-600">Phone/Contact number</div>
-                                    <div className="text-gray-500 mt-1">Example: +1234567890</div>
-                                  </div>
+                                <div className="bg-white p-3 rounded border">
+                                  <div className="font-medium text-swu-red mb-1">Column B: Last Name</div>
+                                  <div className="text-gray-600">Last name (required)</div>
+                                  <div className="text-gray-500 mt-1">Example: Doe</div>
                                 </div>
+                                <div className="bg-white p-3 rounded border">
+                                  <div className="font-medium text-swu-red mb-1">Column C: Email</div>
+                                  <div className="text-gray-600">Email address (required)</div>
+                                  <div className="text-gray-500 mt-1">Example: john@example.com</div>
+                                </div>
+                                <div className="bg-white p-3 rounded border">
+                                  <div className="font-medium text-swu-red mb-1">Column D: Password</div>
+                                  <div className="text-gray-600">Password (required, min 7 chars)</div>
+                                  <div className="text-gray-500 mt-1">Example: MyPass123</div>
+                                </div>
+                                <div className="bg-white p-3 rounded border">
+                                  <div className="font-medium text-swu-red mb-1">Column E: Role</div>
+                                  <div className="text-gray-600">Role (required)</div>
+                                  <div className="text-gray-500 mt-1">Example: organizer</div>
+                                </div>
+                              </div>
                                 <div className="mt-3 text-xs text-gray-600 bg-yellow-50 p-2 rounded border border-yellow-200">
-                                  <strong>Tip:</strong> Use the template download button above to get a properly formatted empty Excel file. Fill it with your actual user information.
+                                  <strong>Tip:</strong> Use the Excel template download button above to get a properly formatted file with maroon headers. Fill it with your actual user information.
                                 </div>
                               </div>
 
@@ -2118,11 +2462,11 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                 </div>
 
                                 <div className="grid gap-2">
-                                  <Label htmlFor="file-upload" className="text-sm font-medium">Select Excel/CSV File *</Label>
+                                  <Label htmlFor="file-upload" className="text-sm font-medium">Select Excel/CSV File <span className="text-red-900">*</span></Label>
                                   <Input
                                     id="file-upload"
                                     type="file"
-                                    accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                                    accept=".csv,.xlsx,.xls"
                                     onChange={handleFileChange}
                                     disabled={uploadingFile}
                                     className="border-gray-300 focus:border-swu-red"
@@ -2134,6 +2478,9 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Role Type Dropdown for Import */}
+
 
                                 {parsedData.length > 0 && (
                                   <div className="border rounded-lg p-4 bg-green-50 border-green-200">
@@ -2148,13 +2495,6 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                     </p>
                                   </div>
                                 )}
-                              </div>
-
-                              <div className="bg-orange-50 p-3 rounded-lg border border-orange-200">
-                                <p className="text-xs text-orange-700">
-                                  <strong>Important:</strong> All uploaded users will be created as "Participant" role with temporary passwords.
-                                  They will be prompted to change their password on first login.
-                                </p>
                               </div>
                             </div>
                           </div>
@@ -2202,9 +2542,18 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
               ) : (
                 <div className="max-h-[calc(100vh-250px)] overflow-y-auto pr-2">
                   <Table>
-                    <TableCaption>Overview of all registered user accounts (admin users excluded for security).</TableCaption>
+                    <TableCaption>Overview of all registered user accounts (admin users excluded for security). Use checkboxes to select multiple users for bulk deletion.</TableCaption>
                     <TableHeader>
                       <TableRow>
+                        {showUserCheckboxes && (
+                          <TableHead className="w-[50px]">
+                            <Checkbox
+                              checked={selectedUsers.size === sortedAndFilteredUsers.filter(u => u.role !== "admin").length && sortedAndFilteredUsers.filter(u => u.role !== "admin").length > 0}
+                              onCheckedChange={handleSelectAllUsers}
+                              aria-label="Select all users"
+                            />
+                          </TableHead>
+                        )}
                         <TableHead className="cursor-pointer" onClick={() => requestSort("displayName")}>
                           First Name
                           <ArrowUpDown className="ml-2 h-4 w-4 inline" />
@@ -2221,11 +2570,6 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                           Role
                           <ArrowUpDown className="ml-2 h-4 w-4 inline" />
                         </TableHead>
-                        <TableHead className="cursor-pointer" onClick={() => requestSort("lastActiveAt")}>
-                          Last Active
-                          <ArrowUpDown className="ml-2 h-4 w-4 inline" />
-                        </TableHead>
-                        <TableHead>Device</TableHead>
                         <TableHead className="cursor-pointer" onClick={() => requestSort("createdAt")}>
                           Created At
                           <ArrowUpDown className="ml-2 h-4 w-4 inline" />
@@ -2242,6 +2586,17 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
 
                         return (
                           <TableRow key={userItem.uid}>
+                            {showUserCheckboxes && (
+                              <TableCell>
+                                {userItem.role !== "admin" && (
+                                  <Checkbox
+                                    checked={selectedUsers.has(userItem.uid)}
+                                    onCheckedChange={(checked) => handleSelectUser(userItem.uid, checked as boolean)}
+                                    aria-label={`Select ${userItem.email}`}
+                                  />
+                                )}
+                              </TableCell>
+                            )}
                             <TableCell className="font-medium">{firstName || "Not provided"}</TableCell>
                             <TableCell className="font-medium">{lastName || "Not provided"}</TableCell>
                             <TableCell>{userItem.email}</TableCell>
@@ -2253,22 +2608,6 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                                 {userItem.role === "organizer" ? "👤" : userItem.role === "participant" ? "👥" : "👑"} {userItem.role}
                               </Badge>
                             </TableCell>
-                            <TableCell>
-                             <div className="flex items-center gap-2">
-                               <span
-                                 className={`h-2.5 w-2.5 rounded-full ${
-                                   userItem.isActive ? "bg-green-500" : "bg-red-500"
-                                 }`}
-                                 title={userItem.isActive ? "Active Now" : "Inactive"}
-                               />
-                               {formatRelativeTime(userItem.lastActiveAt)}
-                             </div>
-                            </TableCell>
-                          <TableCell>
-                            {typeof userItem.lastActiveDevice === "object" && userItem.lastActiveDevice !== null
-                              ? (userItem.lastActiveDevice as any).deviceName || "Unknown Device"
-                              : userItem.lastActiveDevice || "N/A"}
-                          </TableCell>
                           <TableCell>{userItem.createdAt ? userItem.createdAt.toLocaleString() : "N/A"}</TableCell>
                           <TableCell className="flex gap-2">
                             <Dialog
@@ -2438,7 +2777,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg text-swu-red flex items-center gap-2">
                     <Bell className="h-4 w-4" />
-                    Create Announcement
+                    Post Announcement
                   </CardTitle>
                   <CardDescription className="text-sm">
                     Craft and send notifications instantly
@@ -2554,6 +2893,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="low">🔵 Low</SelectItem>
+                            <SelectItem value="medium">🟡 Medium</SelectItem>
                             <SelectItem value="urgent">🔴 Urgent</SelectItem>
                           </SelectContent>
                         </Select>
@@ -2681,69 +3021,110 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
                       <span className="font-medium">Account ID:</span>
                       <span className="text-xs text-muted-foreground font-mono">{user.uid}</span>
                     </div>
+                    {isHardcodedAdmin(user.email || '') && (
+                      <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <span className="font-medium">Account Type:</span>
+                        <Badge variant="outline" className="border-blue-300 text-blue-700">
+                          🔐 Hardcoded Admin
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Change Password */}
-              <Card className="shadow-md">
-                <CardHeader>
-                  <CardTitle className="text-lg text-swu-red">Change Password</CardTitle>
-                  <CardDescription>Update your account password for security</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="current-password">Current Password</Label>
-                      <Input
-                        id="current-password"
-                        type="password"
-                        placeholder="Enter current password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        disabled={changingPassword}
-                      />
-                    </div>
+              {/* Change Password - Only show for non-hardcoded admins */}
+              {!isHardcodedAdmin(user.email || '') && (
+                <Card className="shadow-md">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-swu-red">Change Password</CardTitle>
+                    <CardDescription>Update your account password for security</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="current-password">Current Password</Label>
+                        <Input
+                          id="current-password"
+                          type="password"
+                          placeholder="Enter current password"
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          disabled={changingPassword}
+                        />
+                      </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="new-password">New Password</Label>
-                      <Input
-                        id="new-password"
-                        type="password"
-                        placeholder="Enter new password (min 6 characters)"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        disabled={changingPassword}
-                      />
-                    </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="new-password">New Password</Label>
+                        <Input
+                          id="new-password"
+                          type="password"
+                          placeholder="Enter new password (min 6 characters)"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          disabled={changingPassword}
+                        />
+                      </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="confirm-password">Confirm New Password</Label>
-                      <Input
-                        id="confirm-password"
-                        type="password"
-                        placeholder="Confirm new password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        disabled={changingPassword}
-                      />
-                    </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="confirm-password">Confirm New Password</Label>
+                        <Input
+                          id="confirm-password"
+                          type="password"
+                          placeholder="Confirm new password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          disabled={changingPassword}
+                        />
+                      </div>
 
-                    <Button
-                      onClick={handlePasswordChange}
-                      disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword}
-                      className="w-full bg-swu-red hover:bg-red-700"
-                    >
-                      {changingPassword ? "Updating..." : "Update Password"}
-                    </Button>
+                      <Button
+                        onClick={handlePasswordChange}
+                        disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword}
+                        className="w-full bg-swu-red hover:bg-red-700"
+                      >
+                        {changingPassword ? "Updating..." : "Update Password"}
+                      </Button>
 
-                    <div className="text-xs text-muted-foreground">
-                      <p>• Password must be at least 6 characters long</p>
-                      <p>• You will need to sign in again after changing your password</p>
+                      <div className="text-xs text-muted-foreground">
+                        <p>• Password must be at least 6 characters long</p>
+                        <p>• You will need to sign in again after changing your password</p>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Hardcoded Admin Notice */}
+              {isHardcodedAdmin(user.email || '') && (
+                <Card className="shadow-md">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-blue-600 flex items-center gap-2">
+                      <Shield className="h-5 w-5" />
+                      System Administrator
+                    </CardTitle>
+                    <CardDescription>Special account configuration</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                      <div className="flex items-start gap-3">
+                        <Shield className="h-5 w-5 text-blue-600 mt-0.5" />
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-blue-900">Hardcoded Administrator Account</h4>
+                          <p className="text-sm text-blue-700">
+                            This is a system administrator account with special privileges. Password changes are disabled for security reasons.
+                          </p>
+                          <div className="text-xs text-blue-600 space-y-1">
+                            <p>• Account recreation is automatic if deleted</p>
+                            <p>• Password is managed by system configuration</p>
+                            <p>• Enhanced security measures are in place</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </React.Fragment>
         )}
@@ -2751,7 +3132,7 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
         {activeView === "wheel-types" && (
           <React.Fragment>
             <h2 className="text-3xl font-bold mb-6">Activity Wheel Type Management</h2>
-            <WheelTypeManager />
+            <TypedWheelTypeManager />
           </React.Fragment>
         )}
 
@@ -2914,5 +3295,3 @@ export function AdminDashboard({ user, userRole }: AdminDashboardProps) {
     </SidebarProvider>
   )
 }
-
-

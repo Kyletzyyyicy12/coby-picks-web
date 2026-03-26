@@ -13,8 +13,8 @@ export const getNetworkConfig = (): NetworkConfig => {
   if (typeof window === 'undefined') {
     // Server-side: use environment variables or defaults
     return {
-      baseUrl: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001',
-      networkUrl: process.env.NEXT_PUBLIC_NETWORK_URL || 'http://169.254.83.107:3001',
+      baseUrl: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+      networkUrl: process.env.NEXT_PUBLIC_NETWORK_URL || 'http://169.254.83.107:3000',
       isLocalNetwork: true,
       isProduction: false
     }
@@ -133,13 +133,34 @@ export const logNetworkConfig = () => {
 export const validateNetworkConnectivity = async (): Promise<boolean> => {
   try {
     const config = getNetworkConfig()
+    console.log('🔍 Network connectivity check: Attempting to fetch', `${config.baseUrl}/api/health`)
+
     const response = await fetch(`${config.baseUrl}/api/health`, {
       method: 'HEAD',
-      mode: 'no-cors'
+      mode: 'no-cors',
+      cache: 'no-cache'
     })
+
+    console.log('✅ Network connectivity check: Success, status:', response.status)
     return true
   } catch (error) {
-    console.warn('Network connectivity check failed:', error)
+    console.error('❌ Network connectivity check failed:', {
+      error: error,
+      errorType: error instanceof TypeError ? 'TypeError' : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      url: `${getNetworkConfig().baseUrl}/api/health`,
+      timestamp: new Date().toISOString()
+    })
+
+    // Check if this is the specific "Network request failed" error
+    if (error instanceof TypeError && error.message === 'Network request failed') {
+      console.error('🚨 CRITICAL: "Network request failed" error detected. This typically indicates:')
+      console.error('   - CORS issues')
+      console.error('   - Network connectivity problems')
+      console.error('   - Server not responding')
+      console.error('   - Invalid URL or port')
+    }
+
     return false
   }
 }

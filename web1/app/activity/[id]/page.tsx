@@ -137,7 +137,6 @@ export default function ActivityPage() {
         const wheelTitle = (activityData as any).wheelTitle
         const isPickerWheel = wheelType && (
           wheelType.includes('picker') ||
-          wheelType === 'basic-picker' ||
           wheelType === 'number' ||
           wheelType === 'letter' ||
           wheelType === 'color' ||
@@ -380,7 +379,6 @@ export default function ActivityPage() {
   // Helper function to map picker wheel types to CobyPicksWheel types
    const mapPickerWheelType = (pickerWheelId: string): string => {
      const mapping: Record<string, string> = {
-       "basic-picker": "category",
        "team-picker": "category",
        "yes-no-picker": "yes-no",
        "number-picker": "number",
@@ -519,7 +517,7 @@ export default function ActivityPage() {
               <CobyPicksWheel
                 wheelId={activity.id}
                 congratulatoryMessage={activity.settings?.congratsMessage || "🎉 Congratulations, {winner}! Well done!"}
-                wheelType={mapPickerWheelType((activity as any).wheelType || "basic-picker")}
+                wheelType={mapPickerWheelType((activity as any).wheelType || "team-picker")}
                 numberMin={1}
                 numberMax={100}
                 dateStart=""
@@ -569,6 +567,7 @@ export default function ActivityPage() {
                 onSpinComplete={handleSpinComplete}
                 onSettingsChange={handleSettingsChange}
                 isLiveMode={false}
+                wheelTheme={typeof activity.settings?.theme === 'object' ? activity.settings.theme : undefined}
               />
             )}
           </TabsContent>

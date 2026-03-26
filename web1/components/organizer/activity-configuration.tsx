@@ -10,6 +10,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "@/hooks/use-toast"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { 
   Users, 
   RotateCcw, 
@@ -35,32 +42,29 @@ import { db } from "@/lib/firebase"
 import { collection, addDoc, serverTimestamp, query, where, getDocs } from "firebase/firestore"
 import { useRouter } from "next/navigation"
 import type { User as FirebaseUser } from "firebase/auth"
-import { PickerWheelGallery } from "@/components/picker-wheels/picker-wheel-gallery"
 import type { PickerWheelType } from "@/lib/picker-wheel-types"
+import { getPickerWheelById, PICKER_WHEEL_TYPES, PICKER_CATEGORIES } from "@/lib/picker-wheel-types"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 interface ActivityConfigurationProps {
-  user?: FirebaseUser | null
-  onCancel?: () => void
-  userName?: string
-  autoEnableLiveSession?: boolean // New prop to automatically enable live sessions
-}
+   user?: FirebaseUser | null
+   onCancel?: () => void
+   userName?: string
+   autoEnableLiveSession?: boolean // New prop to automatically enable live sessions
+ }
 
 export function ActivityConfiguration({ user, onCancel, userName = "Organizer", autoEnableLiveSession = false }: ActivityConfigurationProps) {
   const router = useRouter()
   const [isCreating, setIsCreating] = useState(false)
-  const [showWheelGallery, setShowWheelGallery] = useState(false) // FIXED: Start with false to show configuration directly
-  const [selectedWheelType, setSelectedWheelType] = useState<PickerWheelType | null>({
-    // FIXED: Default to a basic wheel type so configuration shows immediately
-    id: 'basic-wheel',
-    title: 'Basic Wheel',
-    icon: '🎯',
-    description: 'Create a custom wheel activity',
-    category: 'personal',
-    defaultItems: ['Option 1', 'Option 2', 'Option 3', 'Option 4'],
-    color: '#8e0b16',
-    isCustomizable: true,
-    maxItems: 100
-  })
+  const [selectedWheelType] = useState<PickerWheelType | null>(
+    getPickerWheelById("yes-no-picker") || null // Default to yes-no-picker for simplicity
+  )
 
   // Generate a unique room code with guaranteed mix of letters and numbers
   const generateRoomCode = (): string => {
@@ -126,6 +130,7 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
   const [roomCode, setRoomCode] = useState("")
   const [allowDataSync, setAllowDataSync] = useState(false)
   const [collaborators, setCollaborators] = useState("teacher2@example.com, coord@example.com")
+  const [defaultPermission, setDefaultPermission] = useState<'full' | 'view'>('full')
 
   // Generate room code when live session is enabled and lock the toggle
   useEffect(() => {
@@ -139,6 +144,9 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
   }, [liveSession, roomCode, generateRoomCode])
 
   const handleCreateWheelActivity = async () => {
+    // Prevent multiple simultaneous calls
+    if (isCreating) return
+
     if (!user) {
       toast({
         title: "Authentication Required",
@@ -148,96 +156,46 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
       return
     }
 
+    // Ensure we have a wheel type (should always be true with our default)
     if (!selectedWheelType) {
       toast({
-        title: "No Wheel Selected",
-        description: "Please select a wheel type first.",
+        title: "Wheel Type Required",
+        description: "Please select a wheel type before creating your activity.",
         variant: "destructive"
       })
       return
     }
 
+    const wheelTypeToUse = selectedWheelType
     setIsCreating(true)
 
+    let sessionId: string | null = null
+
     try {
-      // Parse collaborator emails
+      // Step 1: Parse and validate collaborator emails (basic validation only)
       const rawEmails = collaborators
         .split(',')
         .map(email => email.trim())
         .filter(email => {
-          // Basic email validation
+          // Basic email validation only - skip Firebase validation for speed
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
           return email && emailRegex.test(email) && email !== user.email
         })
 
-      console.log("📧 Processing collaborator emails:", rawEmails)
-
-      // Validate that collaborator emails correspond to existing users
-      const validCollaboratorEmails: string[] = []
-      const invalidEmails: string[] = []
-
-      if (rawEmails.length > 0) {
-        for (const email of rawEmails) {
-          try {
-            // Check if user exists and is an organizer/teacher
-            const usersQuery = query(
-              collection(db, "users"),
-              where("email", "==", email)
-            )
-            const userSnapshot = await getDocs(usersQuery)
-
-            if (userSnapshot.empty) {
-              invalidEmails.push(`${email} (user not found)`)
-              continue
-            }
-
-            const userData = userSnapshot.docs[0].data()
-            const userRole = userData.role?.toLowerCase()
-
-            if (userRole !== 'organizer' && userRole !== 'teacher') {
-              invalidEmails.push(`${email} (not an organizer/teacher)`)
-              continue
-            }
-
-            // Valid collaborator
-            validCollaboratorEmails.push(email)
-
-          } catch (error) {
-            console.error(`Error validating collaborator ${email}:`, error)
-            invalidEmails.push(`${email} (validation error)`)
-          }
-        }
-
-        // Show validation results
-        if (invalidEmails.length > 0) {
-          console.warn("⚠️ Invalid collaborators found:", invalidEmails)
-          toast({
-            title: "Invalid Collaborators",
-            description: `Some emails are not valid organizers: ${invalidEmails.join(', ')}. Only valid collaborators will be invited.`,
-            variant: "destructive",
-            duration: 6000
-          })
-        }
-
-        console.log("✅ Valid collaborators:", validCollaboratorEmails)
-      }
-
-      const collaboratorEmails = validCollaboratorEmails
-
-      // Create a new live draw session with the configured settings
+      // Step 2: Create session data (synchronous preparation)
       const sessionData = {
-        title: `${selectedWheelType.title} Activity for ${userName}`,
-        description: `${selectedWheelType.description} - Created on ${new Date().toLocaleDateString()}`,
-        wheelType: selectedWheelType.id,
-        wheelTitle: selectedWheelType.title,
-        category: selectedWheelType.category,
+        title: `${wheelTypeToUse.title} Activity for ${userName}`,
+        description: `${wheelTypeToUse.description} - Created on ${new Date().toLocaleDateString()}`,
+        wheelType: wheelTypeToUse.id,
+        wheelTitle: wheelTypeToUse.title,
+        category: wheelTypeToUse.category,
         createdBy: user.uid,
         createdAt: serverTimestamp(),
         lastUsed: serverTimestamp(),
         isActive: true,
         isLive: true,
-        currentState: "waiting", // waiting, spinning, completed
-        
+        currentState: "waiting",
+
         // Activity Configuration
         maxParticipants,
         allowReactions,
@@ -245,10 +203,10 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
         soundEffects,
         liveSession,
         allowDataSync,
-        
+
         // Room Code for live sessions
         roomCode: liveSession ? roomCode : null,
-        
+
         // Settings object for compatibility
         settings: {
           maxParticipants,
@@ -259,78 +217,89 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
           allowDataSync,
           roomCode: liveSession ? roomCode : null
         },
-        
-        // Collaboration settings - store validated emails
-        collaborators: collaboratorEmails,
-        collaboratorDetails: collaboratorEmails.map(email => ({
+
+        // Collaboration settings - simplified for speed
+        collaborators: rawEmails, // Store all emails, validation happens later
+        collaboratorDetails: rawEmails.map(email => ({
           email: email,
           invitedAt: new Date(),
           status: 'invited',
+          role: 'collaborator',
           permissions: {
-            canControlLive: true,
-            canEditWheel: true,
-            canManageParticipants: true
+            canControlLive: defaultPermission === 'full',
+            canEditWheel: defaultPermission === 'full',
+            canManageParticipants: defaultPermission === 'full',
+            canViewOnly: defaultPermission === 'view'
           }
         })),
-        
+
         // Default congratulations message
         congratulationsMessage: `🎉 Congratulations, ${userName}! Well done!`,
-        
+
         // Initial participants from selected wheel type
-        participants: selectedWheelType.defaultItems.map((item, index) => ({
+        participants: wheelTypeToUse.defaultItems.map((item, index) => ({
           id: `item-${index}`,
           name: item,
           email: null,
           isSelected: true
         })),
-        
+
         // Selected wheel type from gallery
-        selectedWheelType: selectedWheelType,
-        
+        selectedWheelType: wheelTypeToUse,
+
         // Activity stats
-        participantCount: selectedWheelType.defaultItems.length,
+        participantCount: wheelTypeToUse.defaultItems.length,
         timesUsed: 0,
         theme: "school-colors",
         viewerCount: 0,
         activeViewers: [],
         lastActivity: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        // Theme synchronization data
+        wheelTheme: {
+          primary: "#8e0b16",
+          secondary: "#66181E",
+          accent: "#ffffff",
+          background: "#f8f9fa"
+        },
+        themeName: "School Colors",
+        themeUpdatedAt: serverTimestamp()
       }
 
+      // Step 3: Create the session document (critical operation)
       const docRef = await addDoc(collection(db, "liveDrawSessions"), sessionData)
-      
-      // Send live room invitations to collaborators
-      if (collaboratorEmails.length > 0) {
-        console.log(`📧 Sending ${collaboratorEmails.length} live room invitations...`)
-        
-        for (const email of collaboratorEmails) {
+      sessionId = docRef.id
+
+      // Step 4: Send invitations asynchronously (non-blocking)
+      if (rawEmails.length > 0) {
+        // Send invitations in parallel for speed
+        const invitationPromises = rawEmails.map(async (email) => {
           try {
-            // Create live room invitation for real-time notification
             const invitationData = {
               sessionId: docRef.id,
               sessionTitle: sessionData.title,
               sessionDescription: sessionData.description,
-              wheelType: selectedWheelType.id,
-              wheelTitle: selectedWheelType.title,
-              wheelIcon: selectedWheelType.icon,
+              wheelType: wheelTypeToUse.id,
+              wheelTitle: wheelTypeToUse.title,
+              wheelIcon: wheelTypeToUse.icon,
               roomCode: roomCode,
-              
+
               // Inviter information
               invitedBy: user.uid,
               invitedByName: user.displayName || user.email?.split('@')[0] || userName,
               invitedByEmail: user.email,
-              
+
               // Invitee information
               invitedOrganizerEmail: email,
-              invitedOrganizer: null, // Will be filled when they accept
-              
+              invitedOrganizer: null,
+
               // Invitation details
               status: 'sent',
               type: 'live_room_invitation',
               createdAt: serverTimestamp(),
-              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
-              
-              // Session configuration shared with collaborators
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+
+              // Session configuration
               sessionConfig: {
                 maxParticipants,
                 allowReactions,
@@ -339,119 +308,78 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
                 liveSession: true,
                 allowDataSync
               },
-              
+
               // Collaboration permissions
               permissions: {
-                canControlLive: true,
-                canEditWheel: true,
-                canManageParticipants: true,
-                canEndSession: false, // Only primary organizer can end
+                canControlLive: defaultPermission === 'full',
+                canEditWheel: defaultPermission === 'full',
+                canManageParticipants: defaultPermission === 'full',
+                canViewOnly: defaultPermission === 'view',
+                canEndSession: false,
                 canInviteOthers: false
               },
-              
+
               // Notification metadata
               isRealTimeNotification: true,
               priority: 'high',
               requiresImmediateAttention: true,
-              
-              // Track notification delivery
               notificationSent: true,
               sentAt: serverTimestamp()
             }
-            
-            await addDoc(collection(db, "liveRoomInvitations"), invitationData)
-            console.log(`✅ Live room invitation sent to: ${email}`)
-            
+
+            return await addDoc(collection(db, "liveRoomInvitations"), invitationData)
           } catch (error) {
-            console.error(`❌ Failed to send invitation to ${email}:`, error)
-            // Continue with other invitations even if one fails
+            console.warn(`Failed to send invitation to ${email}:`, error)
+            // Don't throw - continue with other invitations
+            return null
           }
-        }
-        
-        toast({
-          title: "🎉 Activity Created & Invitations Sent!",
-          description: liveSession 
-            ? `${selectedWheelType.title} room created! Code: ${roomCode}. Invitations sent to ${collaboratorEmails.length} collaborator(s).`
-            : `${selectedWheelType.title} activity created! Invitations sent to ${collaboratorEmails.length} collaborator(s).`,
-          duration: 6000
         })
-      } else {
-        toast({
-          title: "Activity Created! 🎉",
-          description: liveSession 
-            ? `${selectedWheelType.title} room created! Code: ${roomCode}`
-            : `${selectedWheelType.title} activity created successfully!`,
+
+        // Wait for all invitations to complete (but don't block navigation)
+        Promise.allSettled(invitationPromises).then((results) => {
+          const successCount = results.filter(r => r.status === 'fulfilled').length
+          console.log(`✅ Sent ${successCount}/${rawEmails.length} invitations`)
         })
       }
 
-      // Navigate to the live draw page (will show LiveDrawManager for organizers)
+      // Step 5: Show success message and navigate (immediate)
+      toast({
+        title: "Activity Created! 🎉",
+        description: liveSession
+          ? `${wheelTypeToUse.title} room created! Code: ${roomCode}`
+          : `${wheelTypeToUse.title} activity created successfully!`,
+      })
+
+      // Step 6: Navigate immediately (don't wait for invitations)
       router.push(`/live/${docRef.id}`)
-      
+
     } catch (error) {
       console.error("Error creating live session:", error)
-      toast({
-        title: "Error",
-        description: "Failed to create live session. Please try again.",
-        variant: "destructive"
-      })
+
+      // If session was created but something else failed, still navigate
+      if (sessionId) {
+        toast({
+          title: "Activity Created (with warnings)",
+          description: "Session created successfully, but some features may not work properly.",
+          variant: "destructive"
+        })
+        router.push(`/live/${sessionId}`)
+      } else {
+        toast({
+          title: "Creation Failed",
+          description: "Failed to create activity. Please try again.",
+          variant: "destructive"
+        })
+      }
     } finally {
       setIsCreating(false)
     }
   }
 
 
-  // Show the picker wheel gallery by default
-  if (showWheelGallery && !selectedWheelType) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-6">
-          <div
-            className="w-full py-4 px-4 rounded-xl text-white shadow-sm"
-            style={{ background: "linear-gradient(135deg, #66181E 0%, #8e0b16 100%)" }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {onCancel && (
-                  <button
-                    type="button"
-                    aria-label="Back to Dashboard"
-                    onClick={onCancel}
-                    className="inline-flex items-center justify-center h-8 w-8 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                )}
-                <div>
-                  <h1 className="text-xl font-semibold leading-tight">Browse Picker Wheels</h1>
-                  <p className="text-xs opacity-90">Select a wheel type to create your activity</p>
-                </div>
-              </div>
-              {user && (
-                <div className="text-sm opacity-90 px-2 py-1 rounded-md bg-white/10">
-                  {user.displayName || user.email}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        {/* Picker Wheel Gallery */}
-        <PickerWheelGallery
-          onSelectWheel={(wheel) => {
-            console.log("🎯 Wheel selected:", wheel)
-            setSelectedWheelType(wheel)
-            setShowWheelGallery(false)
-          }}
-          userRole="organizer"
-          user={user}
-        />
-      </div>
-    )
-  }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
+    <div className="container mx-auto px-4 py-4 sm:px-6 sm:py-8 max-w-4xl w-full">
       {/* Activity Options */}
       <Card className="mb-6 border-2 shadow-lg" style={{borderColor: '#8e0b16'}}>
         <CardHeader className="bg-gradient-to-r from-[#8e0b16] to-[#66181E] text-white rounded-t-lg">
@@ -491,7 +419,7 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
           <div className="border-t-2" style={{borderColor: '#8e0b16'}}></div>
 
           {/* Toggle Options */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
 
 
@@ -695,9 +623,33 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
               className="min-h-[80px] border-2 focus:border-[#8e0b16] focus:ring-[#8e0b16]"
               style={{borderColor: '#8e0b16'}}
             />
+            {/* Permission Selection */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Default Permissions for Collaborators</Label>
+              <Select value={defaultPermission} onValueChange={(value: string) => setDefaultPermission(value as any)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full">Full Access (Control, Edit, Manage)</SelectItem>
+                  <SelectItem value="view">View Only</SelectItem>
+                </SelectContent>
+              </Select>
+              {/* Conditional Permission Options based on selection */}
+              {defaultPermission === 'full' && (
+                <div className="text-xs text-green-600 p-2 bg-green-50 rounded">
+                  ✅ Full permissions: Can control live sessions, edit wheels, manage participants
+                </div>
+              )}
+              {defaultPermission === 'view' && (
+                <div className="text-xs text-gray-600 p-2 bg-gray-50 rounded">
+                  👁️ View only: Can view session and see synchronized spins but cannot trigger spins or make changes
+                </div>
+              )}
+            </div>
             <div className="space-y-2">
               <p className="text-sm text-gray-600">
-                📧 Collaborators will receive real-time notifications in their dashboard to join the live session.
+                📧 Collaborators will receive real-time notifications in their dashboard to join the live session with selected permissions.
               </p>
               {collaborators.trim() && (
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -720,7 +672,7 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
                             <div className="flex flex-wrap gap-1">
                               {validEmails.map((email, index) => (
                                 <Badge key={index} variant="outline" className="text-xs bg-green-50 text-green-700 border-green-300">
-                                  📧 {email}
+                                  📧 {email} ({defaultPermission})
                                 </Badge>
                               ))}
                             </div>
@@ -739,8 +691,8 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
                           </div>
                         )}
                         <div className="text-xs text-blue-600 mt-2">
-                          {validEmails.length > 0 
-                            ? `${validEmails.length} collaborator(s) will receive live room invitations in their dashboard`
+                          {validEmails.length > 0
+                            ? `${validEmails.length} collaborator(s) will receive live room invitations with ${defaultPermission} permissions`
                             : "No valid email addresses to invite"
                           }
                         </div>
@@ -759,19 +711,19 @@ export function ActivityConfiguration({ user, onCancel, userName = "Organizer", 
 
 
       {/* Action Buttons */}
-      <div className="flex gap-4 justify-between">
+      <div className="flex flex-col sm:flex-row gap-4 justify-between">
         <div className="flex gap-4">
           {onCancel && (
-            <Button variant="outline" onClick={onCancel} disabled={isCreating}>
+            <Button variant="outline" onClick={onCancel} disabled={isCreating} className="w-full sm:w-auto">
               <X className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Button>
           )}
         </div>
-        <Button 
+        <Button
           onClick={handleCreateWheelActivity}
           disabled={isCreating}
-          className="text-white px-8 hover:opacity-90 transition-opacity"
+          className="text-white px-8 hover:opacity-90 transition-opacity w-full sm:w-auto"
           style={{backgroundColor: '#8e0b16'}}
         >
           {isCreating ? (

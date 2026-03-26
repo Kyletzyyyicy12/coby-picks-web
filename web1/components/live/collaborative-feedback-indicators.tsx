@@ -128,13 +128,13 @@ export function CollaborativeFeedbackIndicators({
         <CardContent className="p-3">
           <div className="flex items-center gap-3">
             {/* Connection Status */}
-            <div className="flex items-center gap-2">
-              {connectionQuality === 'excellent' && <Wifi className="h-4 w-4 text-green-500" />}
-              {connectionQuality === 'good' && <Wifi className="h-4 w-4 text-yellow-500" />}
-              {connectionQuality === 'poor' && <WifiOff className="h-4 w-4 text-red-500" />}
-              {connectionQuality === 'offline' && <WifiOff className="h-4 w-4 text-gray-500" />}
+            <div key="connection-status" className="flex items-center gap-2">
+              {connectionQuality === 'excellent' && <Wifi key="wifi-excellent" className="h-4 w-4 text-green-500" />}
+              {connectionQuality === 'good' && <Wifi key="wifi-good" className="h-4 w-4 text-yellow-500" />}
+              {connectionQuality === 'poor' && <WifiOff key="wifi-poor" className="h-4 w-4 text-red-500" />}
+              {connectionQuality === 'offline' && <WifiOff key="wifi-offline" className="h-4 w-4 text-gray-500" />}
 
-              <Badge variant="secondary" className={`${getSyncStatusColor(syncStatus)} px-2 py-1`}>
+              <Badge key="sync-badge" variant="secondary" className={`${getSyncStatusColor(syncStatus)} px-2 py-1`}>
                 {syncStatus === 'syncing' && '🔄 Syncing...'}
                 {syncStatus === 'synced' && '✅ In Sync'}
                 {syncStatus === 'error' && '❌ Sync Error'}
@@ -144,24 +144,24 @@ export function CollaborativeFeedbackIndicators({
 
             {/* Participant Summary */}
             <div className="flex items-center gap-2 text-sm text-gray-600">
-              <div className="flex items-center gap-1">
+              <div key="connected" className="flex items-center gap-1">
                 <Users className="h-4 w-4" />
                 <span className="font-medium">{participants.length}</span>
                 <span>connected</span>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div key="online" className="flex items-center gap-1">
                 {participants.filter(p => p.status === 'online').length} online
               </div>
 
               {participants.filter(p => p.status === 'syncing').length > 0 && (
-                <div className="flex items-center gap-1 text-yellow-600">
+                <div key="syncing" className="flex items-center gap-1 text-yellow-600">
                   {participants.filter(p => p.status === 'syncing').length} syncing
                 </div>
               )}
 
               {participants.filter(p => p.status === 'error').length > 0 && (
-                <div className="flex items-center gap-1 text-red-600">
+                <div key="error" className="flex items-center gap-1 text-red-600">
                   {participants.filter(p => p.status === 'error').length} issue
                 </div>
               )}
@@ -184,29 +184,29 @@ export function CollaborativeFeedbackIndicators({
               <h3 className="font-semibold text-lg">Collaborative Room Status</h3>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary" className={`${getSyncStatusColor(syncStatus)} px-3 py-1 text-sm font-medium`}>
+            <div key="sync-status-container" className="flex items-center gap-2">
+              <Badge key="sync-status-badge" variant="secondary" className={`${getSyncStatusColor(syncStatus)} px-3 py-1 text-sm font-medium`}>
                 {syncStatus === 'syncing' && (
                   <>
-                    <Sync className="h-3 w-3 mr-1 animate-spin" />
+                    <Sync key="sync-icon" className="h-3 w-3 mr-1 animate-spin" />
                     Synchronizing...
                   </>
                 )}
                 {syncStatus === 'synced' && (
                   <>
-                    <CheckCircle className="h-3 w-3 mr-1" />
+                    <CheckCircle key="synced-icon" className="h-3 w-3 mr-1" />
                     Perfect Sync
                   </>
                 )}
                 {syncStatus === 'error' && (
                   <>
-                    <AlertCircle className="h-3 w-3 mr-1" />
+                    <AlertCircle key="error-icon" className="h-3 w-3 mr-1" />
                     Sync Issues
                   </>
                 )}
                 {syncStatus === 'idle' && (
                   <>
-                    <Clock className="h-3 w-3 mr-1" />
+                    <Clock key="idle-icon" className="h-3 w-3 mr-1" />
                     Ready
                   </>
                 )}
@@ -216,7 +216,7 @@ export function CollaborativeFeedbackIndicators({
 
           {/* Connection Quality Summary */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div className="space-y-1">
+            <div key="connection" className="space-y-1">
               <div className={`text-2xl font-bold ${
                 connectionQuality === 'excellent' ? 'text-green-600' :
                 connectionQuality === 'good' ? 'text-yellow-600' :
@@ -230,7 +230,7 @@ export function CollaborativeFeedbackIndicators({
               <div className="text-xs text-gray-600 capitalize">{connectionQuality}</div>
             </div>
 
-            <div className="space-y-1">
+            <div key="total" className="space-y-1">
               <div className="text-2xl font-bold text-blue-600">
                 {participants.length}
               </div>
@@ -238,7 +238,7 @@ export function CollaborativeFeedbackIndicators({
               <div className="text-xs text-gray-600">Participants</div>
             </div>
 
-            <div className="space-y-1">
+            <div key="online" className="space-y-1">
               <div className="text-2xl font-bold text-green-600">
                 {participants.filter(p => p.status === 'online').length}
               </div>
@@ -246,7 +246,7 @@ export function CollaborativeFeedbackIndicators({
               <div className="text-xs text-gray-600">Active Now</div>
             </div>
 
-            <div className="space-y-1">
+            <div key="ready" className="space-y-1">
               <div className="text-2xl font-bold text-purple-600">
                 {participants.filter(p => p.isReady).length}
               </div>
@@ -276,7 +276,7 @@ export function CollaborativeFeedbackIndicators({
                 >
                   <div className="flex items-center gap-3">
                     {/* Status Indicator */}
-                    <div className="flex items-center gap-1">
+                    <div key="status-indicator" className="flex items-center gap-1">
                       {getStatusIcon(participant.status)}
                       {getRoleIcon(participant.role)}
                     </div>
@@ -287,33 +287,33 @@ export function CollaborativeFeedbackIndicators({
                         <span className="font-medium">
                           {participant.name}
                           {participant.id === currentUserId && (
-                            <Badge variant="outline" className="ml-2 text-xs px-1 py-0">
+                            <Badge key="you-badge" variant="outline" className="ml-2 text-xs px-1 py-0">
                               You
                             </Badge>
                           )}
                         </span>
-                        <Badge variant="secondary" className="text-xs px-1 py-0 capitalize">
+                        <Badge key="role-badge" variant="secondary" className="text-xs px-1 py-0 capitalize">
                           {participant.role}
                         </Badge>
                       </div>
 
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-xs text-gray-600 capitalize">
+                        <span key="status" className="text-xs text-gray-600 capitalize">
                           {participant.status}
                         </span>
 
                         {participant.ping > -1 && (
-                          <span className="text-xs text-gray-600">
+                          <span key="ping" className="text-xs text-gray-600">
                             🎯 {participant.ping}ms ping
                           </span>
                         )}
 
-                        <span className="text-xs text-gray-600">
+                        <span key="last-seen" className="text-xs text-gray-600">
                           {formatLastSeen(participant.lastSeen)}
                         </span>
 
                         {participant.isReady && (
-                          <Badge variant="secondary" className="text-xs px-1 py-0 bg-green-100 text-green-700">
+                          <Badge key="ready-badge" variant="secondary" className="text-xs px-1 py-0 bg-green-100 text-green-700">
                             <CheckCircle className="h-2 w-2 mr-1" />
                             Ready
                           </Badge>
@@ -323,19 +323,19 @@ export function CollaborativeFeedbackIndicators({
                   </div>
 
                   {/* Ready Check */}
-                  <div className="text-right">
+                  <div key="ready-check" className="text-right">
                     {participant.isReady ? (
-                      <div className="flex items-center gap-1 text-green-700">
+                      <div key="ready" className="flex items-center gap-1 text-green-700">
                         <CheckCircle className="h-4 w-4" />
                         <span className="text-xs font-medium">Ready</span>
                       </div>
                     ) : participant.status === 'syncing' ? (
-                      <div className="flex items-center gap-1 text-yellow-700">
+                      <div key="syncing" className="flex items-center gap-1 text-yellow-700">
                         <Sync className="h-4 w-4 animate-spin" />
                         <span className="text-xs font-medium">Syncing...</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1 text-red-700">
+                      <div key="issue" className="flex items-center gap-1 text-red-700">
                         <AlertCircle className="h-4 w-4" />
                         <span className="text-xs font-medium">Issue</span>
                       </div>
@@ -359,10 +359,10 @@ export function CollaborativeFeedbackIndicators({
                   Synchronization Tips
                 </p>
                 <ul className="text-orange-700 space-y-0.5 text-xs">
-                  <li>• Ensure reliable internet connection</li>
-                  <li>• Close other browser tabs or applications</li>
-                  <li>• Try refreshing if sync issues persist</li>
-                  <li>• Check if other participants are experiencing the same issues</li>
+                  <li key="connection">• Ensure reliable internet connection</li>
+                  <li key="tabs">• Close other browser tabs or applications</li>
+                  <li key="refresh">• Try refreshing if sync issues persist</li>
+                  <li key="others">• Check if other participants are experiencing the same issues</li>
                 </ul>
               </div>
             </div>

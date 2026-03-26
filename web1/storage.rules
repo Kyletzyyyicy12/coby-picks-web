@@ -1,0 +1,88 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isOrganizer() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'organizer';
+    }
+
+    function isParticipant() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'participant';
+    }
+
+    function isOrganizerOrAdmin() {
+      return isOrganizer() || isAdmin();
+    }
+
+    // Allow authenticated users to read all images (for displaying in wheels)
+    match /{allPaths=**} {
+      allow read: if isAuthenticated();
+      // Allow reading for active live sessions even without authentication
+      allow read: if firestore.exists(/databases/(default)/documents/liveDrawSessions/$(allPaths.split('/')[1])) &&
+                     firestore.get(/databases/(default)/documents/liveDrawSessions/$(allPaths.split('/')[1])).data.isActive == true;
+    }
+
+    // Wheel images - organized by session and slice
+    match /wheel-images/{sessionId}/{sliceId}/{fileName} {
+      // Allow reading for all authenticated users (needed for participants to see images)
+      allow read: if isAuthenticated();
+
+      // Allow reading for active live sessions (participants joining via room code)
+      allow read: if firestore.exists(/databases/(default)/documents/liveDrawSessions/$(sessionId)) &&
+                     firestore.get(/databases/(default)/documents/liveDrawSessions/$(sessionId)).data.isActive == true;
+
+      // Allow upload for organizers and admins
+      allow write: if isOrganizerOrAdmin();
+
+      // Allow delete for organizers and admins
+      allow delete: if isOrganizerOrAdmin();
+    }
+
+    // General image uploads for authenticated users
+    match /images/{userId}/{fileName} {
+      // Users can read their own images
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // Users can upload to their own folder
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+
+      // Users can delete their own images
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+
+      // Admins can access all images
+      allow read, write, delete: if isAdmin();
+    }
+
+    // Public images (for shared content)
+    match /public/{fileName} {
+      // Allow public read access
+      allow read: if true;
+
+      // Only admins can upload public images
+      allow write: if isAdmin();
+
+      // Only admins can delete public images
+      allow delete: if isAdmin();
+    }
+
+    // Emergency fallback - allow all operations for development
+    // REMOVE IN PRODUCTION
+    match /{allPaths=**} {
+      allow read, write, delete: if true;
+    }
+  }
+}

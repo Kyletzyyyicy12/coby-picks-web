@@ -11,6 +11,17 @@ export interface ImageWheelSlice {
     fileName?: string
     uploadTimestamp?: Date
     isUploaded?: boolean
+    imgElement?: HTMLImageElement // Pre-loaded image element for performance
+    isBlobUrl?: boolean // Flag to indicate if URL is a blob URL (for real-time sync)
+    blobUrl?: string // Blob URL for displaying OPFS images in React
+    imageId?: string // Image ID for OPFS storage manager
+    storageType?: 'opfs' | 'filesystem' | 'indexeddb' | 'local'
+    // Enhanced error handling properties
+    loadError?: boolean
+    retryCount?: number
+    lastError?: string
+    errorReason?: 'CORS_BLOCKED' | 'NETWORK_ERROR' | 'INVALID_URL' | 'UNSUPPORTED_FORMAT'
+    fallbackMode?: boolean // Indicates if slice is using fallback due to CORS restrictions
   }
   // Additional metadata
   description?: string

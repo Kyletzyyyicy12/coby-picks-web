@@ -1,7 +1,9 @@
 "use client"
 
+import Link from "next/link"
 import { AuthForm } from "@/components/auth/auth-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Shield } from "lucide-react"
 
 export function LandingPage() {
   const schoolColors = {
@@ -30,13 +32,10 @@ export function LandingPage() {
           </div>
           
           <div className="space-y-4 text-lg">
-            <div className="flex items-center gap-3 justify-center lg:justify-start">
-              <div className="text-2xl">🎓</div>
-              <span>Teachers create engaging randomizer activities</span>
-            </div>
+            
             <div className="flex items-center gap-3 justify-center lg:justify-start">
               <div className="text-2xl">🙋‍♂️</div>
-              <span>Students participate in live draws</span>
+              <span>Participants can participate in live draws</span>
             </div>
             <div className="flex items-center gap-3 justify-center lg:justify-start">
               <div className="text-2xl">👤</div>
@@ -60,6 +59,18 @@ export function LandingPage() {
               <div>✅ Student Management</div>
               <div>✅ Activity Templates</div>
             </div>
+          </div>
+
+          {/* Footer */}
+          <div className="text-center text-white/80 text-sm space-y-2">
+            <div>© 2025 Coby Picks. Interactive Randomizer for Educational Excellence.</div>
+            <Link
+              href="/privacy"
+              className="inline-flex items-center gap-1 text-white/80 hover:text-white transition-colors"
+            >
+              <Shield className="h-4 w-4" />
+              Privacy & Data Policy
+            </Link>
           </div>
         </div>
 

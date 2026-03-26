@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
 import { db } from "@/lib/firebase"
-import { doc, onSnapshot, addDoc, collection, serverTimestamp, updateDoc, setDoc } from "firebase/firestore"
-import { Radio, Users, Heart, ThumbsUp, Star, Trophy, Eye, Loader2, Zap, MessageSquare, Send, Volume2, VolumeX } from "lucide-react"
+import { doc, onSnapshot, addDoc, collection, serverTimestamp, updateDoc, setDoc, getDoc } from "firebase/firestore"
+import { Radio, Users, Heart, ThumbsUp, Star, Trophy, Eye, Loader2, Zap, MessageSquare, Send, Volume2, VolumeX, Crown, Copy } from "lucide-react"
 import confetti from "canvas-confetti"
 import { EnhancedWheel } from "@/components/randomizer/enhanced-wheel"
+import { TextWinnerPopup } from "@/components/shared/text-winner-popup"
 
 interface LiveSession {
   id: string
@@ -19,7 +20,7 @@ interface LiveSession {
   description: string
   isActive: boolean
   isSpinning: boolean
-  currentState: "waiting" | "spinning" | "ended"
+  currentState: "waiting" | "spinning" | "ended" | "completed"
   participants: Array<{
     id: string
     name: string
@@ -53,12 +54,23 @@ interface LiveSession {
     isOnline: boolean
   }
   wheelTitle?: string
+  wheelType?: string
+  roomCode?: string
   sessionEndNotification?: {
     message: string
     timestamp: any
     organizerName?: string
     isActive: boolean
   }
+  // Theme synchronization data
+  wheelTheme?: {
+    primary: string
+    secondary: string
+    accent: string
+    background: string
+  }
+  themeName?: string
+  themeUpdatedAt?: any
 }
 
 interface EnhancedLiveViewerProps {
@@ -90,10 +102,23 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
   const [newComment, setNewComment] = useState("")
   const [isMuted, setIsMuted] = useState(false)
   const [spinAnimation, setSpinAnimation] = useState(false)
-  const [wheelRotation, setWheelRotation] = useState(0)
   const [viewerId, setViewerId] = useState<string>('')
   const [waitingForAnimationEnd, setWaitingForAnimationEnd] = useState<boolean>(false)
-  const [lastSpinStart, setLastSpinStart] = useState<number>(0)
+  const [showWinnerPopup, setShowWinnerPopup] = useState(false)
+  const [lastWinnerAnnouncement, setLastWinnerAnnouncement] = useState<string>('')
+  const [collaboratorPermissions, setCollaboratorPermissions] = useState<{
+    canControlLive: boolean
+    canTriggerSynchronizedSpin: boolean
+    canEditWheel: boolean
+    permissionLevel: 'full' | 'view'
+  } | null>(null)
+  const [currentWheelTheme, setCurrentWheelTheme] = useState({
+    primary: "#8e0b16",
+    secondary: "#66181E",
+    accent: "#ffffff",
+    background: "#f8f9fa"
+  })
+  const [lastThemeUpdate, setLastThemeUpdate] = useState<string>("")
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -114,10 +139,10 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
 
   // Helper functions
   const detectPlatform = () => {
-    const userAgent = navigator.userAgent.toLowerCase()
+    const userAgent = (typeof navigator !== 'undefined' && navigator?.userAgent?.toLowerCase()) || ''
     if (userAgent.includes('mobile') || userAgent.includes('android') || userAgent.includes('iphone')) {
       return 'mobile'
-    } else if (window.location.href.includes('app://') || window.location.href.includes('cobypicks://')) {
+    } else if (typeof window !== 'undefined' && (window.location.href.includes('app://') || window.location.href.includes('cobypicks://'))) {
       return 'app'
     } else {
       return 'web'
@@ -165,6 +190,69 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
     }
   }, [viewerName, connected])
 
+  // 🎨 THEME CHANGE HANDLING: Force wheel redraw when theme changes
+  useEffect(() => {
+    if (currentWheelTheme && lastThemeUpdate) {
+      console.log("🎨 PARTICIPANT: Theme changed, wheel should update automatically via EnhancedWheel component", {
+        theme: currentWheelTheme,
+        lastThemeUpdate: lastThemeUpdate,
+        timestamp: new Date().toISOString()
+      })
+
+      // The EnhancedWheel component should handle theme changes automatically
+      // when it receives the wheelTheme prop, but we can add additional logging here
+      // to ensure the theme change is being applied correctly
+    }
+  }, [currentWheelTheme, lastThemeUpdate])
+
+
+  // Function to check if current viewer is a collaborator with specific permissions
+  const checkCollaboratorPermissions = async () => {
+    try {
+      const sessionDoc = await getDoc(doc(db, "liveDrawSessions", sessionId))
+      if (!sessionDoc.exists()) return null
+
+      const sessionData = sessionDoc.data()
+      if (!sessionData.collaboratorDetails) return null
+
+      // Find this viewer's permission in the collaborator details
+      const viewerPermissions = sessionData.collaboratorDetails[viewerName] || sessionData.collaboratorDetails[viewerId]
+
+      if (viewerPermissions) {
+        console.log("🎯 COLLABORATOR PERMISSIONS FOUND:", {
+          viewerName,
+          viewerId,
+          permissions: viewerPermissions,
+          canViewOnly: viewerPermissions.canViewOnly,
+          permissionLevel: viewerPermissions.canViewOnly ? 'view' : 'full'
+        })
+
+        setCollaboratorPermissions({
+          canControlLive: viewerPermissions.canControlLive,
+          canTriggerSynchronizedSpin: viewerPermissions.canTriggerSynchronizedSpin,
+          canEditWheel: viewerPermissions.canEditWheel,
+          permissionLevel: viewerPermissions.canViewOnly ? 'view' : 'full'
+        })
+
+        // ENHANCED: Log the permission determination for debugging
+        console.log("🎯 PERMISSION DETERMINATION:", {
+          viewerName,
+          viewerId,
+          canViewOnly: viewerPermissions.canViewOnly,
+          defaultPermission: viewerPermissions.canViewOnly ? 'view' : 'full',
+          permissionLevel: viewerPermissions.canViewOnly ? 'view' : 'full',
+          timestamp: new Date().toISOString()
+        })
+
+        return viewerPermissions
+      }
+
+      return null
+    } catch (error) {
+      console.error("Error checking collaborator permissions:", error)
+      return null
+    }
+  }
 
   const joinSession = async () => {
     try {
@@ -183,7 +271,7 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
         lastSeen: serverTimestamp(),
         platform: platform,
         connectionId: generatedViewerId,
-        userAgent: navigator.userAgent,
+        userAgent: (typeof navigator !== 'undefined' && navigator?.userAgent) || 'Unknown',
         sessionId: sessionId,
         isOnline: true,
         lastActivity: serverTimestamp()
@@ -267,6 +355,61 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
               }
             }
 
+            // 🎨 THEME SYNCHRONIZATION: Handle theme updates from organizer
+            if (data.wheelTheme && data.themeUpdatedAt) {
+              console.log("🎨 PARTICIPANT: Received theme update from organizer:", {
+                themeName: data.themeName,
+                primary: data.wheelTheme.primary,
+                secondary: data.wheelTheme.secondary,
+                accent: data.wheelTheme.accent,
+                background: data.wheelTheme.background,
+                themeUpdatedAt: data.themeUpdatedAt,
+                sessionId: sessionId,
+                timestamp: new Date().toISOString()
+              })
+
+              // Create a unique identifier for the theme to detect changes
+              const currentThemeId = `${currentWheelTheme.primary}-${currentWheelTheme.secondary}-${currentWheelTheme.accent}-${currentWheelTheme.background}`
+              const newThemeId = `${data.wheelTheme.primary}-${data.wheelTheme.secondary}-${data.wheelTheme.accent}-${data.wheelTheme.background}`
+
+              // Only update if theme has actually changed
+              if (currentThemeId !== newThemeId) {
+                console.log("🎨 PARTICIPANT: Applying organizer theme update:", {
+                  oldTheme: currentWheelTheme,
+                  newTheme: data.wheelTheme,
+                  themeName: data.themeName || 'custom',
+                  themeChanged: true,
+                  sessionId: sessionId,
+                  timestamp: new Date().toISOString()
+                })
+
+                // Update the theme state
+                setCurrentWheelTheme(data.wheelTheme)
+                setLastThemeUpdate(newThemeId)
+
+                // Show notification to participant about theme change
+                toast({
+                  title: "🎨 Theme Updated",
+                  description: `Organizer applied ${data.themeName || 'new'} theme`,
+                  duration: 3000
+                })
+
+                console.log("✅ PARTICIPANT: Theme synchronization completed successfully", {
+                  themeName: data.themeName,
+                  theme: data.wheelTheme,
+                  sessionId: sessionId,
+                  timestamp: new Date().toISOString()
+                })
+              } else {
+                console.log("🎨 PARTICIPANT: Theme unchanged, skipping update:", {
+                  currentThemeId: currentThemeId,
+                  newThemeId: newThemeId,
+                  themeName: data.themeName || 'custom',
+                  timestamp: new Date().toISOString()
+                })
+              }
+            }
+
             setSession(updatedSession)
 
             setLoading(false)
@@ -285,13 +428,11 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
               // IMMEDIATE RESPONSE: Always ensure wheel is spinning when state is spinning
               if (!spinAnimation) {
                 setSpinAnimation(true)
-                setLastSpinStart(Date.now())
                 setWaitingForAnimationEnd(true)
 
                 console.log("🎯 PARTICIPANT: Starting immediate wheel animation")
 
-                // Start animation immediately without delay for better responsiveness
-                startWheelAnimation()
+                // Let EnhancedWheel handle the animation - just play sound and show toast
                 playSound('spin')
 
                 toast({
@@ -311,7 +452,6 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
               if (spinAnimation || waitingForAnimationEnd) {
                 setSpinAnimation(false)
                 setWaitingForAnimationEnd(false)
-                setWheelRotation(0) // Reset wheel to starting position
 
                 // Clear any pending animation state
                 console.log("✅ PARTICIPANT: Reset wheel to starting position")
@@ -406,6 +546,9 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
       setConnected(true)
       setIsNameDialogOpen(false)
 
+      // Check if this viewer has collaborator permissions
+      await checkCollaboratorPermissions()
+
       toast({
         title: "Connected!",
         description: "You're now watching the live session",
@@ -461,44 +604,6 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
     })
   }
 
-  const startWheelAnimation = () => {
-    let animationId: number | null = null
-    let startTime = performance.now()
-
-    const animateWheel = (currentTime: number) => {
-      if (!spinAnimation) {
-        if (animationId) {
-          cancelAnimationFrame(animationId)
-        }
-        return
-      }
-
-      const elapsed = currentTime - startTime
-
-      // FIXED: Smooth, consistent rotation during spin
-      if (elapsed < 3000) { // Spin for 3 seconds
-        const rotationSpeed = Math.max(10, 50 - (elapsed / 60)) // Faster at start, slower at end
-        setWheelRotation(prev => prev + rotationSpeed)
-        animationId = requestAnimationFrame(animateWheel)
-      } else {
-        // FIXED: Automatic completion after duration
-        console.log("✅ PARTICIPANT: Wheel animation completed naturally")
-        if (animationId) {
-          cancelAnimationFrame(animationId)
-        }
-
-        // FIXED: Proper cleanup and winner check after animation
-        setTimeout(() => {
-          if (waitingForAnimationEnd) {
-            setWaitingForAnimationEnd(false)
-            console.log(" plataformas PARTICIPANT: Wheel animation cleanup complete, ready for winner announcement")
-          }
-        }, 200)
-      }
-    }
-
-    animationId = requestAnimationFrame(animateWheel)
-  }
 
   const playSound = (type: 'spin' | 'complete') => {
     if (isMuted) return
@@ -584,7 +689,24 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
         </DialogContent>
       </Dialog>
 
-      <div className="container mx-auto p-4 space-y-6">
+      <div className="container mx-auto p-4 space-y-6 max-w-4xl">
+        {/* Page Header */}
+        <div className="text-center py-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+            🤝 Collaborative Wheel Room
+          </h1>
+          <p className="text-sm sm:text-base text-gray-600">
+            {session?.title || 'Work together in this collaborative wheel experience'}
+          </p>
+          {collaboratorPermissions && (
+            <div className="mt-2">
+              <Badge variant="secondary" className="bg-blue-100 text-blue-700 border border-blue-300">
+                🤝 You're a Collaborator - Enhanced Permissions
+              </Badge>
+            </div>
+          )}
+        </div>
+
         {/* Enhanced Header */}
         <Card className="border-2" style={{ borderColor: schoolColors.primary }}>
           <CardHeader className="bg-gradient-to-r from-[#8e0b16] to-[#66181E] text-white">
@@ -593,7 +715,13 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
                 <Radio className="h-6 w-6" />
                 <div>
                   <CardTitle className="flex items-center gap-2">
-                    {session.title || "Live Session"}
+                    {session.title || "Collaborative Live Session"}
+                    {collaboratorPermissions && (
+                      <Badge variant="secondary" className="bg-yellow-400 text-yellow-900 animate-pulse">
+                        <Crown className="h-3 w-3 mr-1" />
+                        {collaboratorPermissions.permissionLevel.toUpperCase()} ACCESS
+                      </Badge>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -605,285 +733,452 @@ export function EnhancedLiveViewer({ sessionId, participantName }: EnhancedLiveV
                   </CardTitle>
                   <CardDescription className="text-white/80">
                     Welcome, {viewerName}! • {session.viewerCount} viewers
+                    {collaboratorPermissions && (
+                      <span className="text-yellow-200 font-medium">
+                        • {collaboratorPermissions.canTriggerSynchronizedSpin ? 'Can sync spin' : 'Watch only'}
+                      </span>
+                    )}
                   </CardDescription>
                 </div>
               </div>
               <Badge variant="secondary" className="bg-green-500 text-white animate-pulse">
                 <div className="w-2 h-2 bg-white rounded-full mr-2" />
-                LIVE
+                COLLABORATIVE LIVE
               </Badge>
             </div>
           </CardHeader>
         </Card>
 
-        {/* Enhanced Status with Animation */}
-        <Card>
-          <CardContent className="p-6 text-center">
-            {session.currentState === "waiting" && (
-              <div className="space-y-4">
-                <div className="text-6xl animate-pulse">⏳</div>
-                <h2 className="text-2xl font-bold" style={{ color: schoolColors.primary }}>
-                  Waiting for Activity to Start
-                </h2>
-                <p className="text-muted-foreground">
-                  The organizer will start the activity soon...
-                </p>
-              </div>
-            )}
-
-            {session.currentState === "spinning" && (
-              <div className="space-y-4">
-                {/* Actual Wheel Component for synchronized spinning */}
-                <div className="flex justify-center">
-                  <div className="w-full max-w-md">
-                    <EnhancedWheel
-                      participants={session.participants}
-                      isLiveMode={true}
-                      sessionId={sessionId}
-                      studentMode={true}
-                      disabled={true}
-                      selectedWheelType={session.selectedWheelType || null}
-                      wheelTitle={session.wheelTitle || session.title}
-                      enableRealTimeSync={true}
-                      organizerMode={false}
-                      isSpinning={session.currentState === "spinning"}
-                      onWinnersDetected={(winners) => {
-                        console.log("🎯 PARTICIPANT: Winners detected from EnhancedWheel - winner announcement should be synchronized", {
-                          winnerCount: winners.length,
-                          winners: winners.map(w => w.name),
-                          timestamp: new Date().toISOString(),
-                          willShowWinnerAnnouncement: true
-                        })
-
-                        // CRITICAL: Only show winner UI if animation has completed
-                        if (!spinAnimation) {
-                          // Winner announcement should only happen AFTER spin animation completes
-                          console.log("✅ PARTICIPANT: Spin animation completed, showing winner announcement")
-                        } else {
-                          console.log("⏳ PARTICIPANT: Animation still running, winner announcement will be delayed")
-                        }
-                      }}
-                    />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content - Wheel */}
+          <div className="lg:col-span-2">
+            {/* Selected Wheel Type Display - Prominent */}
+            {session.selectedWheelType && (
+              <div className="mb-6 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl shadow-lg">
+                <div className="flex items-center gap-4 mb-3">
+                  <div className="text-2xl">{session.selectedWheelType.icon}</div>
+                  <div className="flex-1">
+                    <h3 className="text-2xl font-bold text-blue-900 mb-1">{session.selectedWheelType.title}</h3>
+                    <p className="text-base text-blue-700 font-medium">{session.selectedWheelType.description}</p>
                   </div>
                 </div>
-                <h2 className="text-2xl font-bold" style={{ color: schoolColors.primary }}>
-                  Activity in Progress!
-                </h2>
-                <p className="text-muted-foreground">
-                  Watch as the results are determined...
-                </p>
-              </div>
-            )}
-
-            {/* FIXED: Winner announcement with proper synchronization */}
-            {session.winners && session.winners.length > 0 && !waitingForAnimationEnd && (
-              <div className="space-y-4">
-                <div className="text-6xl animate-bounce">🎉</div>
-                <div className="space-y-3">
-                  {session.winners.map((winner, index) => (
-                    <div key={`${winner.id}-${session.currentState}`} className="flex items-center justify-center gap-3 p-3 bg-green-50 rounded-lg border border-green-200 animate-in fade-in-50 duration-500">
-                      <Badge variant="default" className="bg-[#8e0b16] animate-pulse">
-                        #{index + 1}
-                      </Badge>
-                      <div>
-                        <p className="font-semibold text-lg">{winner.name}</p>
-                        {winner.email && (
-                          <p className="text-sm text-muted-foreground">{winner.email}</p>
+                <div className="bg-white/60 p-3 rounded-lg border border-blue-200">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="font-semibold text-blue-800">Category:</span>
+                      <span className="ml-2 text-blue-700">{session.selectedWheelType.category}</span>
+                    </div>
+                    <div>
+                      <span className="font-semibold text-blue-800">Items:</span>
+                      <span className="ml-2 text-blue-700">{session.selectedWheelType.defaultItems?.length || 0} loaded</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-600 mt-2 font-medium">
+                    🎯 This wheel type was selected for this collaborative session
+                  </p>
+                  {/* Show sample items */}
+                  {session.selectedWheelType.defaultItems && session.selectedWheelType.defaultItems.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold text-blue-800 mb-1">Sample Items:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {session.selectedWheelType.defaultItems.slice(0, 5).map((item: string, index: number) => (
+                          <span key={index} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                            {item}
+                          </span>
+                        ))}
+                        {session.selectedWheelType.defaultItems.length > 5 && (
+                          <span className="text-xs text-blue-600 px-2 py-1">
+                            +{session.selectedWheelType.defaultItems.length - 5} more
+                          </span>
                         )}
                       </div>
                     </div>
-                  ))}
+                  )}
+                </div>
+              </div>
+            )}
 
-                  {/* FIXED: Show winner announcement message */}
-                  <div className="p-3 bg-green-100 rounded-lg border border-green-300">
-                    <p className="text-center text-green-800 font-medium">
-                      {session.settings?.congratsMessage || "Congratulations to the winners! 🎉"}
-                    </p>
-                  </div>
+            <Card className="bg-white rounded-lg border-2 p-6" style={{ borderColor: schoolColors.primary }}>
+              {/* Real-time wheel display - Always show the wheel */}
+              <div className="space-y-4">
+
+                {/* Session Status Badge */}
+                <div className="flex items-center justify-center mb-4">
+                  {session.currentState === "waiting" && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-800 rounded-full border border-blue-300">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-medium">Organizer is preparing the wheel...</span>
+                    </div>
+                  )}
+                  {session.currentState === "spinning" && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-yellow-100 text-yellow-800 rounded-full border border-yellow-300">
+                      <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-medium">🎯 Wheel is spinning...</span>
+                    </div>
+                  )}
+                  {session.currentState === "completed" && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-800 rounded-full border border-green-300">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-sm font-medium">🎉 Results are ready!</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* FIXED: Clear winner ready message */}
-                {session.currentState === "waiting" && !spinAnimation && (
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200 animate-in fade-in-0 duration-500">
-                    <p className="text-center text-sm text-blue-700 font-medium">
-                      🎯 Ready for Next Spin! The organizer can spin again.
-                    </p>
-                  </div>
-                )}
+                {/* Actual Wheel Component for synchronized spinning */}
+                <div className="space-y-4">
+                  <div className="flex justify-center">
+                    <div className="w-full max-w-none">
+                      {session.selectedWheelType?.id === 'team-picker' || session.wheelType === 'team-picker' ? (
+                        <div className="bg-white rounded-lg p-4 border-2 border-blue-200">
+                          <div className="text-center mb-4">
+                            <h3 className="text-lg font-semibold text-blue-900 mb-2">
+                              👥 Team Picker Wheel
+                            </h3>
+                            <p className="text-sm text-blue-700">
+                              The organizer is using Team Picker to generate random teams
+                            </p>
+                          </div>
+                          {/* Note: EnhancedTeamPicker would be imported and used here */}
+                          <div className="mt-3 text-center text-xs text-blue-600">
+                            🎯 Synchronized with organizer's team generation
+                          </div>
+                        </div>
+                      ) : (
+                        <EnhancedWheel
+                          participants={session.participants?.map(p => ({ id: p.id, name: p.name, email: p.email }))}
+                          isLiveMode={true}
+                          sessionId={sessionId}
+                          studentMode={true}
+                          disabled={!collaboratorPermissions?.canControlLive}
+                          selectedWheelType={session.selectedWheelType || null}
+                          wheelTitle={session.wheelTitle || session.title}
+                          enableRealTimeSync={true}
+                          organizerMode={false}
+                          isSpinning={spinAnimation}
+                          wheelTheme={currentWheelTheme}
+                          customItems={session.selectedWheelType?.defaultItems || session.participants?.map(p => p.name) || []}
+                          userPermissions={{
+                            isFullAccessCollaborator: collaboratorPermissions?.canEditWheel || false,
+                            canTriggerSynchronizedSpin: collaboratorPermissions?.canTriggerSynchronizedSpin || false,
+                            synchronizationEnabled: collaboratorPermissions?.canTriggerSynchronizedSpin || false,
+                            sessionId: sessionId,
+                            userRole: collaboratorPermissions?.permissionLevel || 'viewer',
+                            canViewOnly: collaboratorPermissions?.permissionLevel === 'view'
+                          }}
+                          onWinnersDetected={(winners) => {
+                            console.log("🎯 COLLABORATIVE: Winners detected from EnhancedWheel - winner announcement should be synchronized", {
+                              winnerCount: winners.length,
+                              winners: winners.map(w => w.name),
+                              timestamp: new Date().toISOString(),
+                              willShowWinnerAnnouncement: true
+                            })
 
-                {/* FIXED: Show if waiting for animation to complete */}
-                {waitingForAnimationEnd && (
-                  <div className="mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500"></div>
-                      <p className="text-center text-sm text-yellow-700 font-medium">
-                        Completing wheel animation...
-                      </p>
+                            if (!spinAnimation) {
+                              console.log("✅ COLLABORATIVE: Spin animation completed, showing winner announcement")
+                            } else {
+                              console.log("⏳ COLLABORATIVE: Animation still running, winner announcement will be delayed")
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Real-time wheel type change notification */}
+                  {session.selectedWheelType && (
+                    <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex items-center gap-2 text-blue-800">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        <span className="text-sm font-medium">
+                          🔄 Synchronized with organizer's wheel: {session.selectedWheelType.title}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Reaction Buttons */}
+                {session.settings?.allowReactions && (
+                  <div className="mt-6">
+                    <p className="text-sm text-gray-600 mb-3">Send a reaction:</p>
+                    <div className="flex justify-center gap-3 flex-wrap">
+                      {reactionEmojis.map(({ emoji, label }) => (
+                        <button
+                          key={emoji}
+                          onClick={() => sendReaction(emoji)}
+                          className="text-2xl hover:scale-110 transition-transform p-2 rounded border hover:bg-gray-50"
+                          title={label}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
               </div>
-            )}
+            </Card>
+          </div>
 
-            {/* FIXED: Add waiting indicator while wheel spins */}
-            {waitingForAnimationEnd && session.currentState !== "ended" && (
-              <div className="mt-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
-                <p className="text-center text-sm text-orange-700 font-medium">
-                  🌀 Wheel is spinning... Reconnecting will continue when complete!
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Enhanced Reactions */}
-        {session.settings.allowReactions && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-center flex items-center justify-center gap-2">
-                <Heart className="h-5 w-5" />
-                React to the Session
+        {/* Sidebar - Requests, Reactions, and Comments */}
+        <div className="space-y-4">
+          {/* Session Info */}
+          <Card className="border-2 shadow-lg" style={{borderColor: '#8e0b16'}}>
+            <CardHeader className="bg-gradient-to-r from-[#8e0b16] to-[#66181E] text-white rounded-t-lg p-1.5 sm:p-2">
+              <CardTitle className="text-xs sm:text-sm font-bold flex items-center gap-1.5">
+                <div className="p-0.5 bg-white/20 rounded flex-shrink-0">
+                  <Radio className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                </div>
+                <span className="truncate">Session Info</span>
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex justify-center gap-3 flex-wrap">
-                {reactionEmojis.map(({ emoji, icon: Icon, label }) => (
-                  <Button
-                    key={emoji}
-                    variant="outline"
-                    size="lg"
-                    onClick={() => sendReaction(emoji)}
-                    className="text-2xl hover:scale-110 transition-all duration-200 hover:shadow-md"
-                    style={{ borderColor: schoolColors.primary }}
-                    title={label}
-                  >
-                    {emoji}
-                  </Button>
+            <CardContent className="space-y-1.5 sm:space-y-2 p-2 sm:p-3">
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                <span className="font-medium text-sm" style={{color: '#8e0b16'}}>Status:</span>
+                <Badge variant={
+                  session.currentState === "waiting" ? "secondary" :
+                  session.currentState === "spinning" ? "default" : "destructive"
+                } className="px-2 py-0.5 text-xs">
+                  {session.currentState.toUpperCase()}
+                </Badge>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded-lg">
+                <span className="font-medium text-sm" style={{color: '#8e0b16'}}>Live Status:</span>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${session.isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                  <Badge variant={session.isActive ? "default" : "secondary"} className="px-2 py-0.5 text-xs">
+                    {session.isActive ? "LIVE" : "PAUSED"}
+                  </Badge>
+                </div>
+              </div>
+              {session.roomCode && (
+                <div className="p-2 sm:p-3 border-2 rounded-lg" style={{borderColor: '#8e0b16', backgroundColor: 'rgba(142, 11, 22, 0.05)'}}>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-medium text-xs sm:text-sm" style={{color: '#8e0b16'}}>Room Code:</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 mb-3">
+                    <span className="font-mono font-bold text-lg sm:text-xl px-2 py-1 rounded border-2 bg-white break-all" style={{borderColor: '#8e0b16', color: '#8e0b16'}}>
+                      {session.roomCode}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(session.roomCode!)
+                        toast({
+                          title: "Copied!",
+                          description: "Room code copied to clipboard",
+                        })
+                      }}
+                      className="h-8 w-full sm:w-8 p-1 sm:p-0 border-2 hover:bg-gray-50 text-xs"
+                      style={{borderColor: '#8e0b16', color: '#8e0b16'}}
+                    >
+                      <Copy className="h-3 w-3 sm:mr-0 mr-1" />
+                      <span className="sm:hidden">Copy</span>
+                    </Button>
+                  </div>
+
+                  {/* Invite Options */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        // TODO: Implement invite students functionality
+                        toast({
+                          title: "Coming Soon",
+                          description: "Student invitation feature coming soon!",
+                        })
+                      }}
+                      className="flex items-center gap-1 text-xs h-8 border-2"
+                      style={{borderColor: '#8e0b16', color: '#8e0b16'}}
+                    >
+                      📱 Invite Students
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        // TODO: Implement QR code functionality
+                        toast({
+                          title: "Coming Soon",
+                          description: "QR code generation coming soon!",
+                        })
+                      }}
+                      className="flex items-center gap-1 text-xs h-8 border-2"
+                      style={{borderColor: '#8e0b16', color: '#8e0b16'}}
+                    >
+                      <span className="text-sm">📱</span> QR Code
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        if (navigator.share && session.roomCode) {
+                          navigator.share({
+                            title: 'Join Live Wheel Session',
+                            text: `Join our live wheel session with code: ${session.roomCode}`,
+                            url: window.location.href,
+                          }).catch(console.error)
+                        } else {
+                          navigator.clipboard.writeText(`${window.location.href} (Room Code: ${session.roomCode})`)
+                          toast({
+                            title: "Copied!",
+                            description: "Session link copied to clipboard",
+                          })
+                        }
+                      }}
+                      className="flex items-center gap-1 text-xs h-8 border-2"
+                      style={{borderColor: '#8e0b16', color: '#8e0b16'}}
+                    >
+                      <span className="text-sm">📤</span> Share
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        // TODO: Implement email invites
+                        toast({
+                          title: "Coming Soon",
+                          description: "Email invitation feature coming soon!",
+                        })
+                      }}
+                      className="flex items-center gap-1 text-xs h-8 border-2"
+                      style={{borderColor: '#8e0b16', color: '#8e0b16'}}
+                    >
+                      📧 Send Invites
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-1 sm:gap-2 pt-2 sm:pt-3 border-t border-gray-200">
+                <div className="text-center p-1.5 sm:p-2 bg-gray-50 rounded-lg border">
+                  <div className="text-sm sm:text-base font-bold" style={{color: '#8e0b16'}}>{session.participants?.length || 0}</div>
+                  <div className="text-xs text-gray-600">Items</div>
+                </div>
+                <div className="text-center p-1.5 sm:p-2 bg-gray-50 rounded-lg border">
+                  <div className="text-sm sm:text-base font-bold" style={{color: '#8e0b16'}}>{session.viewerCount || 0}</div>
+                  <div className="text-xs text-gray-600">Viewers</div>
+                </div>
+                <div className="text-center p-1.5 sm:p-2 bg-gray-50 rounded-lg border">
+                  <div className="text-sm sm:text-base font-bold" style={{color: '#8e0b16'}}>{session.winners?.length || 0}</div>
+                  <div className="text-xs text-gray-600">Winners</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Live Participants */}
+          <Card className="border-2 shadow-lg" style={{borderColor: '#8e0b16'}}>
+            <CardHeader className="bg-gradient-to-r from-[#8e0b16] to-[#66181E] text-white rounded-t-lg p-2 sm:p-3">
+              <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-1.5">
+                <div className="p-0.5 bg-white/20 rounded flex-shrink-0">
+                  <Users className="h-3 w-3" />
+                </div>
+                <span className="truncate">
+                  Participants ({session.viewerCount || 0})
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2 sm:p-3">
+              {session.viewerCount === 0 ? (
+                <div className="text-center py-3 text-gray-500">
+                  <div className="p-3 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" style={{color: '#8e0b16'}} />
+                    <p className="text-xs font-medium mb-1" style={{color: '#8e0b16'}}>No participants yet</p>
+                    <p className="text-xs text-gray-600">Use the invite options above to bring people in</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="max-h-32 overflow-y-auto space-y-2">
+                    {/* Display current user */}
+                    <div className="flex items-center justify-between p-2 rounded-lg border-2" style={{backgroundColor: 'rgba(142, 11, 22, 0.05)', borderColor: '#8e0b16'}}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span className="font-medium text-sm" style={{color: '#8e0b16'}}>
+                          {viewerName} (You)
+                        </span>
+                        {collaboratorPermissions && (
+                          <Badge variant="secondary" className="px-1 py-0 text-xs bg-yellow-100 text-yellow-700">
+                            <Crown className="h-3 w-3 mr-1" />
+                            {collaboratorPermissions.permissionLevel.toUpperCase()}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-xs text-green-600 font-medium">
+                        Online
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Comments */}
+          <div className="bg-white rounded-lg border p-4">
+            <h3 className="font-semibold mb-3" style={{ color: schoolColors.primary }}>
+              Live Comments
+            </h3>
+            <div className="space-y-4">
+              {/* Comment Input */}
+              <div className="flex gap-2">
+                <input
+                  placeholder="Type a comment..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && sendComment()}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm"
+                />
+                <Button
+                  onClick={sendComment}
+                  disabled={!newComment.trim()}
+                  className="px-4 py-2 bg-[#8e0b16] text-white rounded text-sm hover:bg-[#66181E] disabled:opacity-50"
+                >
+                  Send
+                </Button>
+              </div>
+
+              {/* Comments List */}
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {comments.map((comment: any) => (
+                  <div key={comment.id} className="p-2 bg-gray-50 rounded">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium text-sm">{comment.userName}</span>
+                      <span className="text-xs text-gray-500">
+                        {comment.timestamp ? comment.timestamp.toLocaleTimeString() : "Just now"}
+                      </span>
+                    </div>
+                    <p className="text-sm">{comment.text}</p>
+                  </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Live Activity Feed */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Reactions */}
-          {reactions.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Heart className="h-5 w-5" />
-                  Live Reactions
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {reactions.slice(0, 10).map((reaction) => (
-                    <div
-                      key={reaction.id}
-                      className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg"
-                    >
-                      <span className="text-2xl">{reaction.emoji}</span>
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{reaction.userName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {reaction.timestamp.toLocaleTimeString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Comments Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Live Chat
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {/* Comments List */}
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {comments.map((comment) => (
-                    <div key={comment.id} className="p-2 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <p className="font-medium text-sm">{comment.userName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {comment.timestamp.toLocaleTimeString()}
-                        </p>
-                      </div>
-                      <p className="text-sm mt-1">{comment.text}</p>
-                    </div>
-                  ))}
-                  {comments.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      No comments yet. Be the first to say something!
-                    </p>
-                  )}
-                </div>
-
-                {/* Comment Input */}
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Type a comment..."
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && sendComment()}
-                    className="flex-1"
-                  />
-                  <Button 
-                    onClick={sendComment}
-                    disabled={!newComment.trim()}
-                    size="sm"
-                    style={{ backgroundColor: schoolColors.primary }}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Participants List */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Participants ({session.participants.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {session.participants.map((participant) => (
-                <div
-                  key={participant.id}
-                  className={`p-3 rounded-lg border transition-colors ${
-                    session.winners.some(w => w.id === participant.id)
-                      ? "bg-green-50 border-green-200 shadow-md"
-                      : "bg-gray-50 border-gray-200"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {session.winners.some(w => w.id === participant.id) && (
-                      <Trophy className="h-4 w-4 text-yellow-500" />
-                    )}
-                    <span className="font-medium">{participant.name}</span>
-                  </div>
-                  {participant.email && (
-                    <p className="text-xs text-muted-foreground mt-1">{participant.email}</p>
-                  )}
-                </div>
-              ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
+
+      {/* Enhanced Winner Popup for Participants */}
+      {session?.winners && session.winners.length > 0 && (
+        <TextWinnerPopup
+          isOpen={showWinnerPopup}
+          onClose={() => setShowWinnerPopup(false)}
+          winners={session.winners}
+          congratsMessage={session.settings?.congratsMessage || "Congratulations! You are the {word}!"}
+          customWinnerMessage={session.settings?.congratsMessage || ""}
+          customWinnerWord="Winner"
+          showConfetti={true}
+          autoClose={15}
+          customTitle="Winner Announcement"
+          theme={{
+            primary: schoolColors.primary,
+            secondary: schoolColors.secondary,
+            accent: schoolColors.accent
+          }}
+        />
+      )}
     </div>
-  )
+  </div>
+)
 }

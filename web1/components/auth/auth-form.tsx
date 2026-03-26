@@ -18,12 +18,17 @@ import { isHardcodedAdmin } from "@/lib/hardcoded-admin"
 import { getRouteForUser, ADMIN_DASHBOARD_PATH } from "@/lib/admin-routing"
 import { PasswordResetVerificationModal } from "./password-reset-verification-modal"
 import { SignupVerificationModal } from "./signup-verification-modal"
+import { FirstLoginSetup } from "./first-login-setup"
+import { RoleSelection } from "./role-selection"
+import Link from "next/link"
+import { Shield } from "lucide-react"
 
 export function AuthForm() {
   const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [fullName, setFullName] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
   const [selectedRole, setSelectedRole] = useState<"participant" | "organizer">("participant")
   const [isRegistering, setIsRegistering] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -33,7 +38,10 @@ export function AuthForm() {
   const [retryAfter, setRetryAfter] = useState(0)
   const [showPasswordResetVerification, setShowPasswordResetVerification] = useState(false)
   const [showSignupVerification, setShowSignupVerification] = useState(false)
-  const [pendingSignupData, setPendingSignupData] = useState<{ email: string; password: string; fullName: string; selectedRole: string } | null>(null)
+  const [showFirstLoginSetup, setShowFirstLoginSetup] = useState(false)
+  const [showRoleSelection, setShowRoleSelection] = useState(false)
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [pendingSignupData, setPendingSignupData] = useState<{ email: string; password: string; firstName: string; lastName: string; selectedRole: string } | null>(null)
 
   // Countdown effect for rate limiting
   useEffect(() => {
@@ -102,7 +110,7 @@ export function AuthForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     // Check if rate limited
     if (rateLimited) {
       toast({
@@ -112,7 +120,7 @@ export function AuthForm() {
       })
       return
     }
-    
+
     setLoading(true)
     try {
       // Check for hardcoded admin account - ALWAYS CREATE IF NOT EXISTS
@@ -126,74 +134,113 @@ export function AuthForm() {
           // Try to sign in first
           console.log('🔍 Attempting admin sign-in...');
           await signInWithEmailAndPassword(auth, email, password)
-          
+
           console.log('✅ Admin sign-in successful');
           toast({
             title: "Admin Login Successful",
             description: "Welcome back, System Administrator!",
           })
-          
+
           const adminRoute = getRouteForUser(email, 'admin');
           console.log(`🎯 Routing admin to: ${adminRoute}`);
           router.push(adminRoute)
           return
-          
+
         } catch (loginError: any) {
-          console.log('⚠️ Admin sign-in failed:', loginError.code);
-          
+          console.log('⚠️ Admin sign-in failed:', loginError.code, loginError.message);
+
           // Handle different authentication error scenarios
-          if (loginError.code === 'auth/user-not-found') {
+          if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/user-disabled') {
             // User doesn't exist, create the account
-            console.log('🔨 Admin account not found, creating in Firebase...');
+            console.log('🔨 Admin account not found in Firebase Auth, creating...');
             try {
+              console.log('📧 Attempting to create admin account with email:', ADMIN_EMAIL);
               const userCredential = await createUserWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_PASSWORD)
               const user = userCredential.user
 
-              console.log('✅ Admin Firebase Auth account created:', user.uid);
+              console.log('✅ Admin Firebase Auth account created successfully:', user.uid);
 
               // Update user profile
               await updateProfile(user, {
                 displayName: "System Administrator"
               })
+              console.log('✅ Admin profile updated');
 
-              // Create user document in Firestore with admin role
-              await setDoc(doc(db, "users", user.uid), {
-                email: user.email,
-                displayName: "System Administrator",
-                fullName: "System Administrator",
-                firstName: "System",
-                lastName: "Administrator",
-                role: "admin",
-                isHardcodedAdmin: true,
-                canDeleteCollections: true,
-                createdAt: new Date(),
-                lastActiveAt: new Date(),
-                lastLoginAt: new Date(),
-                isActive: true,
-                profileComplete: true,
-                lastActiveDevice: "Web App - Auto Created",
-                collaborators: [],
-                dataPrivacyConsentGiven: true,
-                createdBy: "system-auto-creation"
-              })
+              // Check if Firestore document exists, update or create
+              const userDocRef = doc(db, "users", user.uid);
+              const userDocSnap = await getDoc(userDocRef);
 
-              console.log('✅ Admin Firestore document created');
-              
+              if (userDocSnap.exists()) {
+                console.log('📄 Admin Firestore document exists, updating...');
+                // Update existing document
+                await updateDoc(userDocRef, {
+                  lastActiveAt: new Date(),
+                  lastLoginAt: new Date(),
+                  isActive: true,
+                  lastActiveDevice: "Web App - Auto Recreated",
+                  isHardcodedAdmin: true,
+                  canDeleteCollections: true
+                });
+              } else {
+                console.log('📄 Admin Firestore document not found, creating...');
+                // Create user document in Firestore with admin role
+                await setDoc(userDocRef, {
+                  email: user.email,
+                  displayName: "System Administrator",
+                  fullName: "System Administrator",
+                  firstName: "System",
+                  lastName: "Administrator",
+                  role: "admin",
+                  isHardcodedAdmin: true,
+                  canDeleteCollections: true,
+                  createdAt: new Date(),
+                  lastActiveAt: new Date(),
+                  lastLoginAt: new Date(),
+                  isActive: true,
+                  profileComplete: true,
+                  lastActiveDevice: "Web App - Auto Created",
+                  collaborators: [],
+                  dataPrivacyConsentGiven: true,
+                  createdBy: "system-auto-creation"
+                });
+              }
+
+              console.log('✅ Admin Firestore document ready');
+
               toast({
-                title: "Admin Account Created & Login Successful",
-                description: "Admin account has been created in Firebase and you are now logged in!",
+                title: "Admin Account Recreated & Login Successful",
+                description: "Admin account has been recreated in Firebase and you are now logged in!",
               })
-              
+
               const adminRoute = getRouteForUser(ADMIN_EMAIL, 'admin');
-              console.log(`🎯 Routing new admin to: ${adminRoute}`);
+              console.log(`🎯 Routing recreated admin to: ${adminRoute}`);
               router.push(adminRoute)
               return
-              
+
             } catch (createError: any) {
-              console.error('❌ Failed to create admin account:', createError);
+              console.error('❌ Failed to recreate admin account:', createError);
+              console.error('Error details:', {
+                code: createError.code,
+                message: createError.message,
+                stack: createError.stack
+              });
+
+              // Provide specific error messages based on error type
+              let errorMessage = `Failed to recreate admin account: ${createError.message}`;
+
+              if (createError.code === 'auth/email-already-in-use') {
+                errorMessage = 'Admin email is already in use by another account. Please contact support.';
+              } else if (createError.code === 'auth/weak-password') {
+                errorMessage = 'Admin password is too weak. Please contact support.';
+              } else if (createError.code === 'auth/invalid-email') {
+                errorMessage = 'Admin email format is invalid. Please contact support.';
+              }
+
               toast({
-                title: "Account Creation Failed",
-                description: `Failed to create admin account: ${createError.message}`,
+                title: "Account Recreation Failed",
+                description: `${errorMessage}
+
+As a fallback, you can run: node scripts/reset-admin-account.js in the web1 directory to manually recreate the admin account.`,
                 variant: "destructive",
               })
               return
@@ -201,7 +248,7 @@ export function AuthForm() {
           } else if (loginError.code === 'auth/invalid-credential' || loginError.code === 'auth/wrong-password') {
             // Account exists but credentials don't match - provide clear instructions
             console.log('⚠️ Admin account exists but credentials don\'t match, providing resolution steps');
-            
+
             toast({
               title: "Admin Credential Mismatch",
               description: `The admin account exists but with different credentials than expected. To resolve this:
@@ -213,11 +260,11 @@ export function AuthForm() {
 This will reset the account to use the correct hardcoded credentials.`,
               variant: "destructive",
             })
-            
+
             console.log('📝 Instructions: Run "node scripts/reset-admin-account.js" to reset the admin account with correct credentials');
             return
           }
-          
+
           // Handle other authentication errors
           if (loginError.code === 'auth/too-many-requests') {
             // Set rate limiting with 2 minute cooldown
@@ -230,16 +277,7 @@ This will reset the account to use the correct hardcoded credentials.`,
             })
             return
           }
-          
-          if (loginError.code === 'auth/user-disabled') {
-            toast({
-              title: "Account Disabled",
-              description: "The admin account has been disabled. Contact support.",
-              variant: "destructive",
-            })
-            return
-          }
-          
+
           // Generic error for any other cases
           toast({
             title: "Admin Login Error",
@@ -250,10 +288,10 @@ This will reset the account to use the correct hardcoded credentials.`,
         }
       } else if (isRegistering) {
         // Validate registration fields
-        if (!fullName.trim()) {
+        if (!firstName.trim() || !lastName.trim()) {
           toast({
-            title: "Full Name Required",
-            description: "Please enter your full name",
+            title: "Name Required",
+            description: "Please enter both first name and last name",
             variant: "destructive",
           })
           return
@@ -268,35 +306,40 @@ This will reset the account to use the correct hardcoded credentials.`,
           return
         }
 
-        // Step 1: Send signup verification email
-        try {
-          const response = await fetch('/api/auth/send-signup-verification', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ email, fullName }),
+        // Send signup verification email immediately
+        console.log('📧 Sending signup verification email...');
+        const response = await fetch('/api/auth/send-signup-verification', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            email: email.trim().toLowerCase(), 
+            firstName: firstName.trim(), 
+            lastName: lastName.trim() 
+          }),
+        })
+
+        const data = await response.json()
+
+        if (response.ok && data.success) {
+          console.log('✅ Verification email sent successfully');
+          // Store signup data for later completion
+          setPendingSignupData({ email, password, firstName, lastName, selectedRole })
+          
+          toast({
+            title: "Verification Code Sent! 📧",
+            description: "Check your email for the 6-digit verification code to complete your registration.",
           })
-
-          const data = await response.json()
-
-          if (response.ok && data.success) {
-            // Store signup data for later completion
-            setPendingSignupData({ email, password, fullName, selectedRole })
-            setShowSignupVerification(true)
-            
-            toast({
-              title: "Verification Code Sent",
-              description: "Please check your email for the verification code to complete your registration.",
-            })
-            return
-          } else {
-            throw new Error(data.error || 'Failed to send verification code')
-          }
-        } catch (verificationError: any) {
+          
+          // Show verification modal immediately
+          setShowSignupVerification(true)
+          return
+        } else {
+          console.error('❌ Failed to send verification email:', data.error);
           toast({
             title: "Registration Error",
-            description: verificationError.message || "Failed to send verification code. Please try again.",
+            description: data.error || "Failed to send verification code. Please try again.",
             variant: "destructive",
           })
           return
@@ -316,36 +359,31 @@ This will reset the account to use the correct hardcoded credentials.`,
           console.log("Could not update user activity:", error)
         }
 
+        // Check if user needs first login setup
+        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid))
+        const userData = userDoc.exists() ? userDoc.data() : null
+
+        // Check if user needs password reset or recovery email setup
+        const needsPasswordReset = userData?.needsPasswordReset === true
+        const needsRecoveryEmail = !userData?.recoveryEmail
+
+        if (needsPasswordReset || needsRecoveryEmail) {
+          console.log(`🔐 User ${userCredential.user.email} needs first login setup`)
+          setCurrentUser(userCredential.user)
+          setShowFirstLoginSetup(true)
+          return
+        }
+
         toast({
           title: "Login Successful",
-          description: "You have successfully logged in.",
+          description: "Please select your role to continue.",
         })
 
-        // Enhanced admin routing
-        try {
-          console.log(`🔍 Determining route for user: ${userCredential.user.email}`);
-          
-          // Get Firestore role data
-          const userDoc = await getDoc(doc(db, "users", userCredential.user.uid))
-          const userData = userDoc.exists() ? userDoc.data() : null
-          const firestoreRole = userData?.role || "participant"
-          
-          console.log(`📋 Firestore role for ${userCredential.user.email}: ${firestoreRole}`);
-          
-          // Use routing utility to get correct route
-          const targetRoute = getRouteForUser(userCredential.user.email, firestoreRole);
-          console.log(`🎯 Final routing decision: ${userCredential.user.email} -> ${targetRoute}`);
-          
-          router.push(targetRoute);
-          
-        } catch (roleError) {
-          console.error(`❌ Error determining user role for ${userCredential.user.email}:`, roleError);
-          
-          // Critical fallback using routing utility
-          const fallbackRoute = getRouteForUser(userCredential.user.email, undefined);
-          console.log(`🚑 Fallback routing: ${userCredential.user.email} -> ${fallbackRoute}`);
-          router.push(fallbackRoute);
-        }
+        // ALWAYS show role selection after login - this is mandatory every time
+        console.log(`🎭 User ${userCredential.user.email} proceeding to role selection (mandatory every login)`)
+        setCurrentUser(userCredential.user)
+        setShowRoleSelection(true)
+        return
       }
     } catch (error: any) {
       toast({
@@ -358,9 +396,40 @@ This will reset the account to use the correct hardcoded credentials.`,
     }
   }
 
-  const handleSignupVerificationSuccess = async () => {
-    console.log('🔍 Starting account creation after verification...');
-    
+  const handleFirstLoginSetupComplete = async () => {
+    if (!currentUser) return
+
+    try {
+      // Get user data to determine routing
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid))
+      const userData = userDoc.exists() ? userDoc.data() : null
+      const firestoreRole = userData?.role || "participant"
+
+      toast({
+        title: "Setup Complete",
+        description: "Your account is now fully configured!",
+      })
+
+      // Route to appropriate dashboard
+      const targetRoute = getRouteForUser(currentUser.email, firestoreRole)
+      router.push(targetRoute)
+
+      // Reset state
+      setShowFirstLoginSetup(false)
+      setCurrentUser(null)
+    } catch (error) {
+      console.error("Error completing first login setup:", error)
+      toast({
+        title: "Setup Error",
+        description: "There was an error completing your setup. Please try logging in again.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  const handleSignupVerificationSuccess = async (consentData: { teacherConsent: boolean; dataProcessingConsent: boolean }) => {
+    console.log('🔍 Starting account creation via API after verification and consent...');
+
     if (!pendingSignupData) {
       console.log('❌ No pending signup data found');
       return;
@@ -368,90 +437,90 @@ This will reset the account to use the correct hardcoded credentials.`,
 
     console.log('📊 Pending signup data:', {
       email: pendingSignupData.email,
-      fullName: pendingSignupData.fullName,
+      firstName: pendingSignupData.firstName,
+      lastName: pendingSignupData.lastName,
       selectedRole: pendingSignupData.selectedRole,
-      hasPassword: !!pendingSignupData.password
+      hasPassword: !!pendingSignupData.password,
+      consentData
     });
 
     try {
-      const { email, password, fullName, selectedRole } = pendingSignupData
+      const { email, password, firstName, lastName, selectedRole } = pendingSignupData
+
+      console.log('📡 Creating account via server API with privacy consent...');
       
-      console.log('🔥 Creating Firebase user...');
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-      console.log('✅ Firebase user created:', userCredential.user.uid);
+      // Build payload - recovery email is completely optional
+      const signupPayload: Record<string, any> = {
+        email: email.trim().toLowerCase(),
+        code: 'VERIFIED', // Special code indicating web verification completed
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        role: selectedRole,
+        password: password,
+        teacherConsent: consentData.teacherConsent,
+        dataProcessingConsent: consentData.dataProcessingConsent
+      };
 
-      console.log('📝 Updating user profile...');
-      // Update user profile with display name
-      await updateProfile(userCredential.user, {
-        displayName: fullName
-      })
-      console.log('✅ User profile updated');
+      // Only include recovery email if user actually provided one
+      const trimmedRecoveryEmail = recoveryEmail?.trim().toLowerCase();
+      if (trimmedRecoveryEmail && trimmedRecoveryEmail.length > 0) {
+        signupPayload.recoveryEmail = trimmedRecoveryEmail;
+      }
 
-      console.log('🔎 Getting admin role details...');
-      // Auto-detect admin role using utility function
+      // Use the same API as mobile app for consistent verified account creation
+      const response = await fetch('/api/auth/mobile-verify-signup-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(signupPayload)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to create account via API');
+      }
+
+      console.log('✅ Account created via API:', data.user);
+
+      // Now sign in the user with Firebase Auth
+      console.log('🔐 Signing in user...');
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      console.log('✅ User signed in:', userCredential.user.uid);
+
+      // Get admin role details for routing
       const adminDetails = getAdminRoleAssignmentDetails(email.toLowerCase(), selectedRole as "participant" | "organizer")
       console.log('📊 Admin details:', adminDetails);
 
-      console.log('📄 Creating Firestore document...');
-      // Create user profile in Firestore with auto-detected role (mobile/web compatible)
-      await setDoc(doc(db, "users", userCredential.user.uid), {
-        email: userCredential.user.email,
-        displayName: fullName,
-        fullName: fullName,  // For mobile compatibility
-        role: adminDetails.finalRole,
-        isHardcodedAdmin: adminDetails.isHardcodedAdmin, // Mark as hardcoded admin if email matches
-        roleLocked: adminDetails.roleLocked, // Lock the role to prevent unauthorized changes
-        roleLockedAt: new Date(),
-        roleChangedBy: adminDetails.roleChangedBy,
-        roleChangeHistory: [{
-          oldRole: null,
-          newRole: adminDetails.finalRole,
-          changedBy: adminDetails.roleChangedBy,
-          changedAt: new Date(),
-          reason: adminDetails.reason,
-          adminEmail: adminDetails.isHardcodedAdmin ? 'system-auto-detect' : null
-        }],
-        recoveryEmail: recoveryEmail ? recoveryEmail.trim().toLowerCase() : null,
-        createdAt: new Date(),
-        lastActiveAt: new Date(),
-        lastLoginAt: new Date(),
-        isActive: true,
-        profileComplete: true,
-        lastActiveDevice: "Web App",
-        collaborators: [],  // For mobile compatibility
-        dataPrivacyConsentGiven: false,  // For mobile compatibility
-      })
-      console.log('✅ Firestore document created');
+      console.log('📍 User registered successfully, proceeding to role selection...');
 
-      console.log('📍 Determining route...');
-      // Enhanced admin routing for registration using routing utility
-      const targetRoute = getRouteForUser(email, adminDetails.finalRole);
-      console.log(`🎯 Registration routing: ${email} (${adminDetails.finalRole}) -> ${targetRoute}`);
-      
-      if (adminDetails.isHardcodedAdmin || targetRoute === ADMIN_DASHBOARD_PATH) {
+      if (adminDetails.isHardcodedAdmin || adminDetails.finalRole === 'admin') {
         console.log('🔑 Admin account created');
         toast({
           title: "Admin Account Created Successfully!",
-          description: `Welcome ${fullName}! Your admin account has been automatically configured based on your email address.`,
+          description: `Welcome ${firstName} ${lastName}! Your admin account has been automatically configured based on your email address.`,
         })
+        const adminRoute = getRouteForUser(email, 'admin');
+        router.push(adminRoute);
       } else {
-        console.log('👤 Regular account created');
+        console.log('👤 Regular account created, showing role selection');
         toast({
           title: "Account Created Successfully!",
-          description: `Welcome ${fullName}! Your ${selectedRole} account is ready.`,
+          description: `Welcome ${firstName} ${lastName}! Please select your role to continue.`,
         })
+        // Always show role selection after signup
+        setCurrentUser(userCredential.user);
+        setShowRoleSelection(true);
       }
-      
-      console.log('🚪 Navigating to dashboard...');
-      router.push(targetRoute);
-      
+
       console.log('🧽 Cleaning up...');
       // Clear pending data
       setPendingSignupData(null)
       setShowSignupVerification(false)
-      
+
       console.log('✅ Account creation completed successfully!');
-      
+
     } catch (error: any) {
       console.error('💥 Registration error:', error);
       console.error('📊 Error details:', {
@@ -460,7 +529,7 @@ This will reset the account to use the correct hardcoded credentials.`,
         code: error.code,
         stack: error.stack
       });
-      
+
       toast({
         title: "Registration Error",
         description: error.message || "Failed to complete registration after verification.",
@@ -510,6 +579,20 @@ This will reset the account to use the correct hardcoded credentials.`,
     )
   }
 
+  if (showRoleSelection && currentUser) {
+    return (
+      <RoleSelection
+        onRoleSelected={(role) => {
+          // Navigate to appropriate dashboard after role selection
+          const route = role === "organizer" ? "/organizer" : "/participants"
+          router.push(route)
+          setShowRoleSelection(false)
+          setCurrentUser(null)
+        }}
+      />
+    )
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen p-4">
       <Card className="mx-auto max-w-sm border-swu-red shadow-lg">
@@ -526,16 +609,31 @@ This will reset the account to use the correct hardcoded credentials.`,
       <CardContent className="p-6">
         <form onSubmit={handleSubmit} className="grid gap-4">
           {isRegistering && (
-            <div className="grid gap-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                type="text"
-                placeholder="Enter your full name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
+            <div className="grid gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="firstName">First Name</Label>
+                  <Input
+                    id="firstName"
+                    type="text"
+                    placeholder="John"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="lastName">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    type="text"
+                    placeholder="Doe"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
             </div>
           )}
           <div className="grid gap-2">
@@ -587,46 +685,12 @@ This will reset the account to use the correct hardcoded credentials.`,
               </Button>
             )}
           </div>
-          {isRegistering && (
-            <div className="grid gap-2">
-              <Label htmlFor="role">I am a...</Label>
-              <div className="grid gap-3">
-                <div
-                  className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                    selectedRole === "participant" ? "border-swu-red bg-red-50" : "border-gray-200 hover:border-gray-300"
-                  }`}
-                  onClick={() => setSelectedRole("participant")}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="text-2xl">👥</div>
-                    <div>
-                      <h4 className="font-medium">Participant</h4>
-                      <p className="text-sm text-muted-foreground">Join activities, participate in live draws, view results</p>
-                    </div>
-                  </div>
-                </div>
-                <div
-                  className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                    selectedRole === "organizer" ? "border-swu-red bg-red-50" : "border-gray-200 hover:border-gray-300"
-                  }`}
-                  onClick={() => setSelectedRole("organizer")}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="text-2xl">👤</div>
-                    <div>
-                      <h4 className="font-medium">Organizer</h4>
-                      <p className="text-sm text-muted-foreground">Create activities, manage participants, coordinate events</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+
           <Button type="submit" className="w-full bg-swu-red hover:bg-swu-red/90 text-white" disabled={loading || rateLimited}>
             {rateLimited ? `Wait ${retryAfter}s` : loading ? "Loading..." : isRegistering ? "Register" : "Login"}
           </Button>
         </form>
-        
+
         {rateLimited && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-sm font-medium text-red-900 mb-1">⏱️ Rate Limited</p>
@@ -634,7 +698,7 @@ This will reset the account to use the correct hardcoded credentials.`,
             <p className="text-xs text-red-600 mt-1">This is a Firebase security measure to protect accounts.</p>
           </div>
         )}
-        
+
         <div className="mt-4 text-center text-sm">
           {isRegistering ? "Already have an account?" : "Don't have an account?"}{" "}
           <Button variant="link" onClick={() => setIsRegistering(!isRegistering)} className="p-0 h-auto text-swu-red">
@@ -644,15 +708,15 @@ This will reset the account to use the correct hardcoded credentials.`,
 
       </CardContent>
     </Card>
-    
+
     {/* 2FA Verification Modals - Sign Up and Password Reset Only */}
-    
+
     <PasswordResetVerificationModal
       isOpen={showPasswordResetVerification}
       onClose={() => setShowPasswordResetVerification(false)}
       email={email}
     />
-    
+
     <SignupVerificationModal
       isOpen={showSignupVerification}
       onClose={() => {
@@ -660,10 +724,17 @@ This will reset the account to use the correct hardcoded credentials.`,
         setPendingSignupData(null)
       }}
       email={pendingSignupData?.email || ''}
-      fullName={pendingSignupData?.fullName || ''}
+      firstName={pendingSignupData?.firstName || ''}
+      lastName={pendingSignupData?.lastName || ''}
       onSuccess={handleSignupVerificationSuccess}
     />
+
+    {showFirstLoginSetup && currentUser && (
+      <FirstLoginSetup
+        user={currentUser}
+        onComplete={handleFirstLoginSetupComplete}
+      />
+    )}
     </div>
   )
 }
-

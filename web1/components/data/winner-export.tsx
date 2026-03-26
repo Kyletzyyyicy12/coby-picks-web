@@ -12,9 +12,11 @@ import { collection, query, getDocs } from "firebase/firestore"
 import { toast } from "@/hooks/use-toast"
 import Papa from "papaparse"
 import { Download, FileText, Filter, Users } from "lucide-react"
+import { THEMES } from "@/lib/wheel-data"
 
 interface WinnerExportProps {
   wheelId: string
+  wheelTheme?: string // Accept string theme value
 }
 
 interface SpinLog {
@@ -44,7 +46,36 @@ interface ExportPreset {
   description: string
 }
 
-export function WinnerExport({ wheelId }: WinnerExportProps) {
+export function WinnerExport({ wheelId, wheelTheme }: WinnerExportProps) {
+  // Default theme if none provided
+  const defaultTheme = {
+    primary: "#8e0b16",
+    secondary: "#66181E",
+    accent: "#ffffff",
+    background: "#f8f9fa"
+  }
+
+  // Convert string theme to theme object
+  const getThemeObject = (themeString?: string) => {
+    if (!themeString || themeString === "default") {
+      return defaultTheme
+    }
+
+    const theme = THEMES.find(t => t.value === themeString)
+    if (!theme || !theme.colors || theme.colors.length === 0) {
+      return defaultTheme
+    }
+
+    return {
+      primary: theme.colors[0] || defaultTheme.primary,
+      secondary: theme.colors[1] || defaultTheme.secondary,
+      accent: theme.colors[2] || defaultTheme.accent,
+      background: defaultTheme.background
+    }
+  }
+
+  const currentTheme = getThemeObject(wheelTheme)
+
   const [spinLogs, setSpinLogs] = useState<SpinLog[]>([])
   const [allParticipants, setAllParticipants] = useState<Participant[]>([]) // Only for 'participant' type
   const [selectedColumns, setSelectedColumns] = useState<string[]>([])
@@ -282,19 +313,19 @@ export function WinnerExport({ wheelId }: WinnerExportProps) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-swu-red">{spinLogs.length}</div>
+            <div className="text-2xl font-bold" style={{ color: currentTheme.primary }}>{spinLogs.length}</div>
             <p className="text-sm text-muted-foreground">Total Spins</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-swu-red">{filteredSpinLogs.length}</div>
+            <div className="text-2xl font-bold" style={{ color: currentTheme.primary }}>{filteredSpinLogs.length}</div>
             <p className="text-sm text-muted-foreground">Filtered Results</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
-            <div className="text-2xl font-bold text-swu-red">{availableColumns.length}</div>
+            <div className="text-2xl font-bold" style={{ color: currentTheme.primary }}>{availableColumns.length}</div>
             <p className="text-sm text-muted-foreground">Available Columns</p>
           </CardContent>
         </Card>
@@ -397,7 +428,8 @@ export function WinnerExport({ wheelId }: WinnerExportProps) {
                       id={`col-${col}`}
                       checked={selectedColumns.includes(col)}
                       onCheckedChange={() => handleColumnToggle(col)}
-                      className="data-[state=checked]:bg-swu-red data-[state=checked]:text-white"
+                      className="data-[state=checked]:text-white"
+                      style={{ '--checked-bg': currentTheme.primary } as React.CSSProperties}
                     />
                     <Label htmlFor={`col-${col}`} className="capitalize text-sm cursor-pointer">
                       {col.replace(/([A-Z])/g, " $1").trim()}
@@ -420,7 +452,8 @@ export function WinnerExport({ wheelId }: WinnerExportProps) {
         <Button
           onClick={handleExport}
           disabled={filteredSpinLogs.length === 0 || selectedColumns.length === 0}
-          className="bg-swu-red hover:bg-swu-red/90 text-white"
+          className="text-white hover:opacity-90"
+          style={{ backgroundColor: currentTheme.primary }}
           size="lg"
         >
           <Download className="h-4 w-4 mr-2" />
@@ -450,7 +483,7 @@ export function WinnerExport({ wheelId }: WinnerExportProps) {
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <p className="font-medium text-swu-red">
+                        <p className="font-medium" style={{ color: currentTheme.primary }}>
                           {log.timestamp.toLocaleDateString()} at {log.timestamp.toLocaleTimeString()}
                         </p>
                         <Badge variant="outline" className="text-xs">
@@ -466,7 +499,8 @@ export function WinnerExport({ wheelId }: WinnerExportProps) {
                         {log.winners.slice(0, 3).map((winner, index) => (
                           <Badge
                             key={index}
-                            className="bg-swu-red hover:bg-swu-red/90 text-white text-xs"
+                            className="text-white text-xs hover:opacity-90"
+                            style={{ backgroundColor: currentTheme.primary }}
                           >
                             {winner.name}
                           </Badge>

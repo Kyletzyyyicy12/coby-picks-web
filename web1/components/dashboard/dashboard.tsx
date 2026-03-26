@@ -227,9 +227,9 @@ export function Dashboard({ user, userRole }: { user: User; userRole: string }) 
         icon: doc.data().wheelTypeIcon
       }))
 
-      // Combine and deduplicate wheel types
+      // Combine and deduplicate wheel types from Firestore only
       const allWheelTypes = [...globalWheelTypes, ...userSpecificWheelTypes, ...emailBasedWheelTypes]
-      const uniqueWheelTypes = allWheelTypes.filter((type, index, self) => 
+      const uniqueWheelTypes = allWheelTypes.filter((type, index, self) =>
         index === self.findIndex(t => t.value === type.value)
       )
       
@@ -238,12 +238,8 @@ export function Dashboard({ user, userRole }: { user: User; userRole: string }) 
       
       setAvailableWheelTypes(uniqueWheelTypes)
 
-      // Set default new wheel type to the first available if not already set
-      if (
-        newWheelType === "participant" &&
-        uniqueWheelTypes.length > 0 &&
-        !uniqueWheelTypes.some((t) => t.value === "participant")
-      ) {
+      // Set default new wheel type to first available if any exist
+      if (uniqueWheelTypes.length > 0) {
         setNewWheelType(uniqueWheelTypes[0].value)
       }
     }
@@ -973,7 +969,7 @@ export function Dashboard({ user, userRole }: { user: User; userRole: string }) 
                       <Download className="h-5 w-5" />
                     </CardHeader>
                     <CardContent className="p-6">
-                      <WinnerExport wheelId={selectedWheel.id} />
+                      <WinnerExport wheelId={selectedWheel.id} wheelTheme={selectedWheel.theme} />
                     </CardContent>
                   </Card>
                 </div>

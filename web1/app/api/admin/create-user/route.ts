@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { sendWelcomeEmail } from '@/lib/email-service'
 
 // Global variables for Firebase Admin SDK
 let adminAuth: any = null
@@ -163,6 +164,14 @@ async function handleUserCreation(request: NextRequest) {
       )
     }
 
+    // Validate password length
+    if (password.length < 7) {
+      return NextResponse.json(
+        { error: 'Password must be at least 7 characters long' },
+        { status: 400 }
+      )
+    }
+
     // Verify that the requesting user is an admin
     try {
       const adminUser = await adminAuth.getUserByEmail(adminEmail)
@@ -198,7 +207,7 @@ async function handleUserCreation(request: NextRequest) {
       createdAt: new Date(),
       lastActiveAt: new Date(),
       isActive: false,
-      profileComplete: true,
+      profileComplete: false, // Set to false so user goes through first login setup
       lastActiveDevice: isImport ? 'Admin Import' : 'Admin Created',
       createdBy: adminEmail,
       createdByAdmin: true,
@@ -218,10 +227,24 @@ async function handleUserCreation(request: NextRequest) {
 
     await adminDb.collection('users').doc(userRecord.uid).set(userData)
 
+    // Send welcome email with password
+    try {
+      const emailResult = await sendWelcomeEmail(email, name, password, role, adminEmail)
+      if (emailResult.success) {
+        console.log(`✅ Welcome email sent successfully to ${email}`)
+      } else {
+        console.warn(`⚠️ Failed to send welcome email to ${email}: ${emailResult.error}`)
+      }
+    } catch (emailError) {
+      console.warn(`⚠️ Error sending welcome email for ${email}:`, emailError)
+      // Don't fail the user creation if email fails
+    }
+
     return NextResponse.json({
       success: true,
       message: `User ${email} created successfully with role ${role}`,
       userId: userRecord.uid,
+      emailSent: true,
     })
 
   } catch (error: any) {

@@ -18,6 +18,7 @@ import { auth, db } from '@/lib/firebase'
 import { isHardcodedAdmin } from '@/lib/hardcoded-admin'
 import { toast } from '@/hooks/use-toast'
 import Papa from 'papaparse'
+import ExcelJS from 'exceljs'
 
 interface UserData {
   id: string
@@ -249,17 +250,83 @@ export default function UserManagement() {
     setUploadResults(null)
   }
 
-  const downloadTemplate = () => {
-    const csvContent = 'First Name,Last Name,Email,Role,Password'
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'coby_picks_user_template.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-    toast({ title: "Success", description: "Template downloaded successfully" })
+  const downloadTemplate = async () => {
+    try {
+      console.log('Creating Excel template...')
+
+      // Create workbook and worksheet using ExcelJS
+      const workbook = new ExcelJS.Workbook()
+      const worksheet = workbook.addWorksheet('User Template')
+
+      console.log('Workbook created')
+
+      // Define the data with headers only
+      const headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password']
+
+      // Add headers
+      worksheet.addRow(headers)
+
+      // Set column widths
+      worksheet.getColumn(1).width = 20 // First Name
+      worksheet.getColumn(2).width = 20 // Last Name
+      worksheet.getColumn(3).width = 35 // Email
+      worksheet.getColumn(4).width = 15 // Role
+      worksheet.getColumn(5).width = 15 // Password
+
+      // Style the header row (row 1)
+      const headerRow = worksheet.getRow(1)
+      headerRow.height = 25
+
+      // Apply maroon background and white text to header cells
+      headerRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+      headerRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF800000' } }
+
+      headerRow.getCell(1).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(2).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(3).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(4).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+      headerRow.getCell(5).font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 12 }
+
+      headerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' }
+      headerRow.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' }
+
+      console.log('Generating Excel buffer...')
+
+      // Generate and download the file
+      const buffer = await workbook.xlsx.writeBuffer()
+      console.log('Buffer generated, size:', buffer.byteLength)
+
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      })
+
+      console.log('Blob created, downloading...')
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'coby_picks_user_template.xlsx'
+      link.click()
+      URL.revokeObjectURL(url)
+
+      console.log('Download initiated')
+
+      toast({ title: "Success", description: "Excel template downloaded successfully" })
+
+    } catch (error) {
+      console.error('Error creating Excel template:', error)
+      toast({
+        title: "Error",
+        description: "Failed to create Excel template. Please try again.",
+        variant: "destructive"
+      })
+    }
   }
 
   if (!isAdmin) return <div className="p-8">Access denied</div>
@@ -398,19 +465,20 @@ export default function UserManagement() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <Label className="text-sm font-medium text-gray-900">CSV File Upload</Label>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={downloadTemplate}
                       className="text-blue-600 border-blue-600 hover:bg-blue-50 hover:border-blue-700"
                     >
-                      <Download className="h-3 w-3 mr-1" />Download Template
+                      <Download className="h-3 w-3 mr-1" />Download Excel Template
                     </Button>
                   </div>
                   
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
-                    <p className="text-xs text-blue-800 font-medium mb-1">Required CSV Columns:</p>
+                    <p className="text-xs text-blue-800 font-medium mb-1">Required Excel Columns:</p>
                     <p className="text-xs text-blue-700">First Name, Last Name, Email, Role (participant/organizer), Password</p>
+                    <p className="text-xs text-blue-600 mt-1 italic">Template includes formatted headers with maroon styling</p>
                   </div>
                   
                   <Input 

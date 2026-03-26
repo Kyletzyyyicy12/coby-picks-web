@@ -11,7 +11,8 @@ import { AdminDashboard } from "@/components/admin/admin-dashboard"
 import { TeacherDashboardEnhanced } from "@/components/dashboards/teacher-dashboard-enhanced"
 import { OrganizerDashboard } from "@/components/dashboards/organizer-dashboard"
 import { ParticipantDashboard, StudentDashboard } from "@/components/dashboards/student-dashboard"
-import { WheelTypeProvider } from "@/components/providers/wheel-type-provider"
+import { RoleSelection } from "@/components/auth/role-selection"
+import { ConsentManager } from "@/components/privacy/consent-manager"
 import { isHardcodedAdmin, ensureHardcodedAdminAccess } from "@/lib/hardcoded-admin"
 import { toast } from "@/hooks/use-toast"
 
@@ -19,6 +20,7 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [hasConsent, setHasConsent] = useState<boolean | null>(null)
 
   // Rate limiting and caching state
   const lastFirestoreCallRef = useRef<{ [key: string]: number }>({})
@@ -81,6 +83,7 @@ export default function Home() {
       if (isAutoLogoutInProgress || !authInitialized) {
         setUser(currentUser)
         setUserRole(null)
+        setHasConsent(null)
         setLoading(false)
         return
       }
@@ -92,6 +95,7 @@ export default function Home() {
           if (cachedRole) {
             console.log("✅ Using cached role:", cachedRole)
             setUserRole(cachedRole)
+            setHasConsent(true) // Assume consent if cached
             setLoading(false)
             return
           }
@@ -101,6 +105,7 @@ export default function Home() {
             console.log("🔑 Hardcoded admin detected:", currentUser.email)
             setUserRole("admin")
             setCachedRole(currentUser.uid, "admin")
+            setHasConsent(true) // Admins bypass consent
 
             // Rate limit admin document creation
             if (!isRateLimited(`admin_${currentUser.uid}`)) {
@@ -128,28 +133,41 @@ export default function Home() {
               const userDocSnap = await getDoc(userDocRef)
 
               if (userDocSnap.exists()) {
-                const userData = userDocSnap.data()
-                const role = userData.role || "participant"
-                setUserRole(role)
-                setCachedRole(currentUser.uid, role)
+                // Check if user has given privacy consent
+                const consentDocRef = doc(db, "privacyConsents", currentUser.uid)
+                const consentDocSnap = await getDoc(consentDocRef)
 
-                // Update last active timestamp and device (less frequently)
-                if (!isRateLimited(`activity_${currentUser.uid}`)) {
-                  await setDoc(
-                    userDocRef,
-                    {
-                      lastActiveAt: new Date(),
-                      lastActiveDevice: "web",
-                      isActive: true,
-                    },
-                    { merge: true },
-                  )
+                if (consentDocSnap.exists()) {
+                  const consentData = consentDocSnap.data()
+                  const hasValidConsent = consentData.teacherConsent && consentData.dataProcessingConsent
+
+                  if (hasValidConsent) {
+                    // User has valid consent, proceed to role selection
+                    console.log("✅ User has valid privacy consent")
+                    setHasConsent(true)
+                    setUserRole(null) // This will trigger role selection screen
+                    setLoading(false)
+                    return
+                  } else {
+                    // User has consent document but invalid consent
+                    console.log("⚠️ User has invalid privacy consent")
+                    setHasConsent(false)
+                    setLoading(false)
+                    return
+                  }
+                } else {
+                  // No consent document exists
+                  console.log("📋 User needs to provide privacy consent")
+                  setHasConsent(false)
+                  setLoading(false)
+                  return
                 }
               } else {
                 // If user document does not exist (e.g., deleted by admin), sign them out
                 await signOut(auth)
                 setUser(null)
                 setUserRole(null)
+                setHasConsent(null)
                 toast({
                   title: "Account Removed",
                   description: "Your account has been removed by an administrator. Please contact support.",
@@ -163,6 +181,7 @@ export default function Home() {
               console.log("⏱️ Rate limited, using default participant role")
               setUserRole("participant")
               setCachedRole(currentUser.uid, "participant")
+              setHasConsent(true) // Assume consent for rate limited users
             }
           }
         } catch (error) {
@@ -174,33 +193,39 @@ export default function Home() {
             const cachedRole = getCachedRole(currentUser.uid)
             if (cachedRole) {
               setUserRole(cachedRole)
+              setHasConsent(true)
             } else {
               // For hardcoded admins, still give admin access even if Firestore fails
               if (isHardcodedAdmin(currentUser.email)) {
                 setUserRole("admin")
+                setHasConsent(true)
                 toast({
                   title: "Admin Access Granted",
                   description: "Logged in as hardcoded administrator (offline mode)",
                 })
               } else {
                 setUserRole("participant")
+                setHasConsent(true)
               }
             }
           } else {
             // For hardcoded admins, still give admin access even if Firestore fails
             if (isHardcodedAdmin(currentUser.email)) {
               setUserRole("admin")
+              setHasConsent(true)
               toast({
                 title: "Admin Access Granted",
                 description: "Logged in as hardcoded administrator",
               })
             } else {
               setUserRole("participant")
+              setHasConsent(true)
             }
           }
         }
       } else {
         setUserRole(null)
+        setHasConsent(null)
       }
       setLoading(false)
     })
@@ -217,23 +242,55 @@ export default function Home() {
   }
 
   return (
-    <WheelTypeProvider userRole={userRole || "participant"}>
-      <div className="min-h-screen bg-gray-50">
-        {user ? (
-          userRole === "admin" ? (
-            <AdminDashboard user={user} userRole={userRole} />
-          ) : userRole === "organizer" ? (
-            <OrganizerDashboard user={user} />
-          ) : userRole === "participant" ? (
-            <ParticipantDashboard user={user} participantName={user.displayName || undefined} />
-          ) : (
-            <ParticipantDashboard user={user} participantName={user.displayName || undefined} />
-          )
+    <div className="min-h-screen bg-gray-50">
+      {user ? (
+        hasConsent === false ? (
+          // Show privacy consent first - MANDATORY
+          <ConsentManager
+            user={user}
+            showDialog={true}
+            onConsentComplete={(consented) => {
+              if (consented) {
+                console.log("✅ Privacy consent accepted, proceeding to role selection")
+                setHasConsent(true)
+                setUserRole(null) // Trigger role selection
+              } else {
+                console.log("❌ Privacy consent declined, signing out")
+                // Sign out user if they decline consent
+                signOut(auth)
+                setUser(null)
+                setUserRole(null)
+                setHasConsent(null)
+                toast({
+                  title: "Access Denied",
+                  description: "Privacy consent is required to use Coby Picks. You have been signed out.",
+                  variant: "destructive",
+                })
+              }
+            }}
+          />
+        ) : userRole === null ? (
+          // Show role selection after consent is given
+          <RoleSelection
+            onRoleSelected={(role) => {
+              console.log(`🎭 Role selected: ${role}, updating user role`)
+              setUserRole(role)
+              setCachedRole(user.uid, role)
+            }}
+          />
+        ) : userRole === "admin" ? (
+          <AdminDashboard user={user} userRole={userRole} />
+        ) : userRole === "organizer" ? (
+          <OrganizerDashboard user={user} />
+        ) : userRole === "participant" ? (
+          <ParticipantDashboard user={user} participantName={user.displayName || undefined} />
         ) : (
-          <LandingPage />
-        )}
-        <Toaster />
-      </div>
-    </WheelTypeProvider>
+          <ParticipantDashboard user={user} participantName={user.displayName || undefined} />
+        )
+      ) : (
+        <LandingPage />
+      )}
+      <Toaster />
+    </div>
   )
 }

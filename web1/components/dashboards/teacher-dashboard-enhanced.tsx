@@ -16,6 +16,7 @@ import { WheelCustomization } from "@/components/teacher/wheel-customization"
 import { ActivityConfiguration } from "@/components/organizer/activity-configuration"
 
 import { AnnouncementDisplay } from "@/components/shared/announcement-display"
+import { ConsentManager } from "@/components/privacy/consent-manager"
 import {
   Gamepad2,
   BarChart3,
@@ -86,6 +87,8 @@ export function TeacherDashboardEnhanced({ user }: TeacherDashboardEnhancedProps
   const [loading, setLoading] = useState(true)
   const [activeModal, setActiveModal] = useState<string | null>(null)
   const [showActivityConfiguration, setShowActivityConfiguration] = useState(false)
+  const [showConsentDialog, setShowConsentDialog] = useState(false)
+  const [hasConsent, setHasConsent] = useState(false)
 
   // School colors
   const schoolColors = {
@@ -148,7 +151,6 @@ export function TeacherDashboardEnhanced({ user }: TeacherDashboardEnhancedProps
       const pickerWheelActivities = activities.filter(a =>
         a.wheelType && (
           a.wheelType.includes('picker') ||
-          a.wheelType === 'basic-picker' ||
           a.wheelTitle?.includes('Picker')
         )
       )
@@ -167,7 +169,6 @@ export function TeacherDashboardEnhanced({ user }: TeacherDashboardEnhancedProps
         // Check if it's a Picker Wheel Gallery activity
         const isPickerWheelActivity = activity.wheelType && (
           activity.wheelType.includes('picker') ||
-          activity.wheelType === 'basic-picker' ||
           activity.wheelTitle?.includes('Picker')
         )
 
@@ -550,7 +551,6 @@ export function TeacherDashboardEnhanced({ user }: TeacherDashboardEnhancedProps
                               // Check if this is a Picker Wheel Gallery activity
                               const isPickerWheelActivity = activity.wheelType && (
                                 activity.wheelType.includes('picker') ||
-                                activity.wheelType === 'basic-picker' ||
                                 activity.wheelTitle?.includes('Picker')
                               )
 
@@ -638,6 +638,15 @@ export function TeacherDashboardEnhanced({ user }: TeacherDashboardEnhancedProps
         </DialogContent>
       </Dialog>
 
+      {/* Consent Dialog */}
+      <ConsentManager
+        user={user}
+        showDialog={showConsentDialog}
+        onConsentComplete={(consented) => {
+          setHasConsent(consented)
+          setShowConsentDialog(false)
+        }}
+      />
 
     </div>
   )

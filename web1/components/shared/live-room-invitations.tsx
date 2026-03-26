@@ -10,14 +10,16 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { toast } from "@/hooks/use-toast"
-import { 
-  Bell, 
-  Users, 
-  Check, 
-  X, 
-  Clock, 
-  Crown, 
+import {
+  Bell,
+  Users,
+  Check,
+  X,
+  Clock,
+  Crown,
   Shield,
   Loader2,
   Radio,
@@ -26,7 +28,9 @@ import {
   ChevronDown,
   ChevronUp,
   CheckSquare,
-  QrCode
+  QrCode,
+  Send,
+  Plus
 } from "lucide-react"
 import { db } from "@/lib/firebase"
 import {
@@ -42,6 +46,7 @@ import {
   getDocs
 } from "firebase/firestore"
 import { useAuth } from "@/contexts/AuthContext"
+import EnhancedCollaborativeLiveRoomManager, { type EnhancedOrganizerPresence } from "@/lib/enhanced-collaborative-live-room-manager"
 
 interface LiveRoomInvitation {
   id: string
@@ -95,17 +100,39 @@ interface LiveRoomInvitation {
 
 interface LiveRoomInvitationsProps {
   user?: any
+  showSentInvitations?: boolean
+  session?: any // Add session prop to enable sending invitations from dashboard
+  onInvitationSent?: () => void // Callback when an invitation is sent
 }
 
-export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
+export function LiveRoomInvitations({ user, showSentInvitations = false, session, onInvitationSent }: LiveRoomInvitationsProps) {
   const { currentUser, userProfile } = useAuth()
   const [invitations, setInvitations] = useState<LiveRoomInvitation[]>([])
+  const [sentInvitations, setSentInvitations] = useState<LiveRoomInvitation[]>([])
   const [loading, setLoading] = useState<string | null>(null)
   const [showNotifications, setShowNotifications] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  // State for sending invitations (when session prop is provided)
+  const [collaboratorEmail, setCollaboratorEmail] = useState("")
+  const [isInvitingCollaborator, setIsInvitingCollaborator] = useState(false)
+  // Enhanced Collaborative Live Room Manager integration
+  const [collaborativeManager, setCollaborativeManager] = useState<EnhancedCollaborativeLiveRoomManager | null>(null)
 
   // Use the passed user prop or fall back to currentUser from auth context
   const activeUser = user || currentUser
+
+  // Initialize Enhanced Collaborative Live Room Manager
+  useEffect(() => {
+    const manager = EnhancedCollaborativeLiveRoomManager.getInstance()
+    setCollaborativeManager(manager)
+
+    console.log("🎯 Enhanced Collaborative Live Room Manager initialized for invitations")
+
+    // Cleanup on unmount
+    return () => {
+      console.log("🧹 Cleanup: Enhanced Collaborative Live Room Manager instance")
+    }
+  }, [])
 
   // Listen for live room invitations for current organizer
   useEffect(() => {
@@ -215,6 +242,84 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
     }
   }, [activeUser?.email])
 
+  // Listen for sent invitations if showSentInvitations is enabled
+  useEffect(() => {
+    if (!showSentInvitations || !activeUser?.email) {
+      setSentInvitations([])
+      return
+    }
+
+    console.log("📤 Setting up sent invitations listener for:", activeUser.email)
+
+    // Query for sent invitations by the user's email
+    const sentInvitationsQuery = query(
+      collection(db, 'liveRoomInvitations'),
+      where('invitedByEmail', '==', activeUser.email),
+      where('status', '==', 'sent')  // Only show pending invitations that haven't been accepted/declined
+    )
+
+    const unsubscribeSent = onSnapshot(
+      sentInvitationsQuery,
+      (snapshot) => {
+        const newSentInvitations: LiveRoomInvitation[] = []
+
+        snapshot.forEach((doc) => {
+          const data = doc.data()
+
+          // Check if invitation hasn't expired
+          const now = new Date()
+          const expiresAt = data.expiresAt instanceof Date ? data.expiresAt :
+                          data.expiresAt?.toDate ? data.expiresAt.toDate() :
+                          new Date(data.expiresAt)
+
+          if (expiresAt && now < expiresAt) {
+            const sentInvitation: LiveRoomInvitation = {
+              id: doc.id,
+              sessionId: data.sessionId,
+              sessionTitle: data.sessionTitle,
+              sessionDescription: data.sessionDescription,
+              wheelType: data.wheelType,
+              wheelTitle: data.wheelTitle,
+              wheelIcon: data.wheelIcon,
+              roomCode: data.roomCode,
+              invitedBy: data.invitedBy,
+              invitedByName: data.invitedByName,
+              invitedByEmail: data.invitedByEmail,
+              invitedOrganizerEmail: data.invitedOrganizerEmail,
+              invitedOrganizer: data.invitedOrganizer,
+              status: data.status,
+              type: data.type,
+              createdAt: data.createdAt,
+              expiresAt: data.expiresAt,
+              sessionConfig: data.sessionConfig,
+              permissions: data.permissions,
+              isRealTimeNotification: data.isRealTimeNotification,
+              priority: data.priority,
+              requiresImmediateAttention: data.requiresImmediateAttention
+            }
+
+            newSentInvitations.push(sentInvitation)
+          } else {
+            console.log("⏰ Sent invitation expired, skipping:", doc.id)
+          }
+        })
+
+        console.log(`📤 Found ${newSentInvitations.length} pending sent invitations`)
+
+        setSentInvitations(newSentInvitations)
+      },
+      (error) => {
+        console.error('❌ Error listening for sent invitations:', error)
+        setSentInvitations([])
+      }
+    )
+
+    return () => {
+      console.log("🔕 Cleaning up sent invitations listener")
+      unsubscribeSent()
+    }
+  }, [activeUser?.email, showSentInvitations])
+
   const handleAcceptInvitation = async (invitation: LiveRoomInvitation) => {
     if (!activeUser) {
       toast({
@@ -227,6 +332,46 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
 
     setLoading(invitation.id)
     try {
+      // 🎯 Enhanced Collaborator Addition using Collaborative Live Room Manager
+      console.log("🎯 Using Enhanced Collaborative Live Room Manager for invitation acceptance", {
+        sessionId: invitation.sessionId,
+        invitationId: invitation.id,
+        managerAvailable: !!collaborativeManager
+      })
+
+      // Create organizer presence data for the collaborative manager
+      const organizerPresence: EnhancedOrganizerPresence = {
+        uid: activeUser.uid,
+        name: activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer',
+        email: activeUser.email || '',
+        isOnline: true,
+        lastSeen: Date.now(),
+        permissions: {
+          canControlLive: invitation.permissions.canControlLive,
+          canEditWheel: invitation.permissions.canEditWheel,
+          canManageParticipants: invitation.permissions.canManageParticipants,
+          canBroadcast: true // Assume broadcast capability for live sessions
+        },
+        connectionQuality: 'excellent',
+        currentAction: 'accepting_invitation'
+      }
+
+      // If collaborative manager is available, update organizer presence
+      if (collaborativeManager) {
+        console.log("🎯 Using Enhanced Collaborative Live Room Manager for organizer presence")
+
+        try {
+          // Update organizer presence with the collaborative manager
+          await collaborativeManager.updateEnhancedOrganizerPresence(
+            invitation.sessionId,
+            organizerPresence
+          )
+          console.log("✅ Organizer presence updated in collaborative manager")
+        } catch (error) {
+          console.warn("⚠️ Failed to update organizer presence:", error)
+          // Continue with invitation acceptance even if presence update fails
+        }
+      }
       console.log(`✅ Accepting live room invitation:`, {
         invitationId: invitation.id,
         sessionId: invitation.sessionId,
@@ -326,7 +471,50 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
         console.log("✅ Added collaborator to live session:", invitation.sessionId)
       }
 
-      // Create acceptance notification for the inviter
+      // 🎯 Enhanced Collaborative Notification and Action Tracking
+      console.log("🎯 Creating collaborative notification for joined collaborator")
+
+      if (collaborativeManager) {
+        try {
+          console.log("🎯 Using Enhanced Collaborative Live Room Manager for notification")
+
+          const broadcastParams = {
+            message: `🎉 Collaborator joined: ${activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer'}`,
+            sessionTitle: invitation.sessionTitle,
+            permissions: invitation.permissions,
+            collaboratorInfo: {
+              uid: activeUser.uid,
+              name: activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer',
+              email: activeUser.email,
+              platform: 'web',
+              joinedAt: new Date()
+            }
+          }
+
+          const collaborativeResult = await collaborativeManager.executeCollaborativeAction({
+            sessionId: invitation.sessionId,
+            wheelId: invitation.wheelType || 'live-session',
+            action: 'broadcast_message',
+            performedBy: activeUser.uid,
+            performedByName: activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer',
+            parameters: broadcastParams,
+            priority: 'high'
+          })
+
+          if (collaborativeResult.success) {
+            console.log("✅ Enhanced collaborative notification created:", collaborativeResult.message)
+          } else {
+            console.warn("⚠️ Enhanced collaborative notification failed:", collaborativeResult.message)
+            // Continue with fallback
+          }
+        } catch (error) {
+          console.error("❌ Enhanced collaborative notification error:", error)
+          // Continue with fallback
+        }
+      }
+
+      // Fallback traditional notification (always created regardless of collaborative manager status)
+      console.log("📨 Creating traditional notification as fallback")
       await addDoc(collection(db, 'liveSessionNotifications'), {
         title: '🎉 Collaborator Joined Live Room!',
         message: `${activeUser.displayName || 'An organizer'} has accepted your live room invitation and joined "${invitation.sessionTitle}" (Room: ${invitation.roomCode}). They can now collaborate on the live session!`,
@@ -356,37 +544,101 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
       // Show success toast with shorter duration
       toast({
         title: "🎯 Joined Live Room!",
-        description: `Successfully joined "${invitation.sessionTitle}". Entering live session...`,
+        description: `Successfully joined "${invitation.sessionTitle}". Entering live session${collaborativeManager ? ' with enhanced collaborative features' : ''}...`,
         duration: 1000 // Shorter toast duration
       })
 
-      // Navigate immediately to the live session (no artificial delay)
-      console.log("🚀 Redirecting to live session...")
+      // Update collaborative presence one more time before redirect
+      if (collaborativeManager) {
+        try {
+          organizerPresence.lastSeen = Date.now()
+          organizerPresence.isOnline = true
+          organizerPresence.currentAction = 'joined_session'
+
+          await collaborativeManager.updateEnhancedOrganizerPresence(
+            invitation.sessionId,
+            organizerPresence
+          )
+          console.log("✅ Final organizer presence update before session join")
+        } catch (error) {
+          console.warn("⚠️ Final organizer presence update failed:", error)
+        }
+      }
+
+      // 🎯 Navigate to collaborative wheel room for enhanced control
+      console.log("🚀 Redirecting to collaborative wheel room...")
       try {
-        // Use the current URL pattern consistently
-        window.location.href = `/live/${invitation.sessionId}`
+        // Direct navigation to collaborative wheel room for full control capabilities
+        const collaborativeUrl = `/collaborative-wheel-room/${invitation.sessionId}?invitationId=${invitation.id}&collaborative=true`
+
+        window.location.href = collaborativeUrl
+        console.log("🎯 Collaborative Wheel Room Navigation:", {
+          sessionId: invitation.sessionId,
+          url: collaborativeUrl,
+          collaborativeManager: !!collaborativeManager,
+          invitationAccepted: true,
+          organizerRole: 'invited_collaborator',
+          destination: 'collaborative_wheel_room'
+        })
 
         // Fallback in case window.location fails
         setTimeout(() => {
-          if (window.location.pathname !== `/live/${invitation.sessionId}`) {
+          if (window.location.pathname !== `/collaborative-wheel-room/${invitation.sessionId}`) {
             console.warn("⚠️ Direct navigation failed, attempting retry...")
-            window.location.href = `/live/${invitation.sessionId}`
+            window.location.href = collaborativeUrl
           }
         }, 500)
       } catch (navError) {
         console.error("❌ Navigation error:", navError)
         toast({
           title: "Navigation Error",
-          description: "Failed to redirect to live session. Please refresh and try again.",
+          description: "Failed to redirect to collaborative wheel room. Please refresh and try again.",
           variant: "destructive"
         })
       }
 
     } catch (error: any) {
       console.error('❌ Error accepting live room invitation:', error)
+
+      // Enhanced error handling with collaborative manager feedback
+      let errorMessage = "Failed to accept live room invitation. Please try again."
+      let errorTitle = "Error"
+
+      if (error.message?.includes('permission')) {
+        errorMessage = "You don't have permission to join this collaborative session. Contact the organizer."
+        errorTitle = "Permission Denied"
+      } else if (error.message?.includes('network') || error.message?.includes('timeout')) {
+        errorMessage = "Network error occurred. Please check your connection and try again."
+        errorTitle = "Connection Error"
+      } else if (error.message?.includes('session not found') || error.message?.includes('not found')) {
+        errorMessage = "This live session is no longer available. It may have been deleted."
+        errorTitle = "Session Not Found"
+      }
+
+      // If collaborative manager is available, log the error to the system
+      if (collaborativeManager) {
+        try {
+          await collaborativeManager.executeCollaborativeAction({
+            sessionId: invitation.sessionId,
+            wheelId: invitation.wheelType || 'live-session',
+            action: 'broadcast_message',
+            performedBy: activeUser.uid,
+            performedByName: activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer',
+            parameters: {
+              message: `⚠️ Error joining live session: ${error.message}`,
+              type: 'error_notification',
+              errorCode: error.code || 'UNKNOWN_ERROR'
+            },
+            priority: 'normal'
+          })
+        } catch (logError) {
+          console.warn("⚠️ Could not log error to collaborative system:", logError)
+        }
+      }
+
       toast({
-        title: "Error",
-        description: "Failed to accept live room invitation. Please try again.",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive"
       })
     } finally {
@@ -428,30 +680,190 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
       roomCode,
       sessionTitle
     })
-    
+
     toast({
       title: "Joining Live Session...",
       description: `Connecting to "${sessionTitle}" (Room: ${roomCode})`,
     })
-    
+
     // Navigate to live session
     window.location.href = `/live/${sessionId}`
   }
 
-  if (invitations.length === 0) {
-    return null // Don't render anything if no invitations
+  // NEW: Function to send collaborator invitations from dashboard
+  const handleSendInvitation = async () => {
+    if (!collaboratorEmail.trim()) {
+      toast({
+        title: "Email Required",
+        description: "Please enter a collaborator email address",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (!session?.id) {
+      toast({
+        title: "No Active Session",
+        description: "Please provide a session to invite collaborators to",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (!activeUser?.uid || !activeUser?.email) {
+      toast({
+        title: "Authentication Required",
+        description: "You must be logged in to send invitations",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setIsInvitingCollaborator(true)
+
+    try {
+      console.log("📧 Sending collaborator invitation:", {
+        email: collaboratorEmail.trim(),
+        from: activeUser.email,
+        sessionId: session.id,
+        sessionTitle: session.title || session.wheelTitle
+      })
+
+      // Create collaborator invitation record
+      const invitationData = {
+        sessionId: session.id,
+        invitedOrganizerEmail: collaboratorEmail.trim().toLowerCase(),
+        invitedOrganizer: null, // Will be filled when they accept
+        invitedBy: activeUser.uid,
+        invitedByName: activeUser.displayName || activeUser.email?.split('@')[0] || 'Organizer',
+        invitedByEmail: activeUser.email,
+        status: 'sent',
+        type: 'live_room_invitation',
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days expiry
+        sessionTitle: session.title || session.wheelTitle || 'Live Wheel Session',
+        sessionDescription: session.description || 'Join me for a collaborative wheel drawing session',
+        wheelType: session.wheelType || 'team-picker',
+        wheelTitle: session.title || session.wheelTitle || 'Live Wheel',
+        wheelIcon: session.wheelIcon || '🎯',
+        roomCode: session.roomCode || '',
+        sessionConfig: {
+          maxParticipants: 50,
+          allowReactions: true,
+          confettiEffect: true,
+          soundEffects: true,
+          liveSession: true,
+          allowDataSync: true
+        },
+        permissions: {
+          canControlLive: true,
+          canEditWheel: true,
+          canManageParticipants: true,
+          canEndSession: false,
+          canInviteOthers: false
+        },
+        isRealTimeNotification: true,
+        priority: 'high',
+        requiresImmediateAttention: true
+      }
+
+      // Save invitation to Firestore
+      const invitationRef = await addDoc(collection(db, 'liveRoomInvitations'), invitationData)
+
+      console.log("✅ Collaborator invitation saved to database:", invitationRef.id)
+
+      // Send email notification using the service
+      try {
+        const emailContent = {
+          to: collaboratorEmail.trim(),
+          subject: `You're invited to collaborate on "${session.title || session.wheelTitle}"`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2 style="color: #8e0b16;">🎯 Session Collaboration Invite</h2>
+              <p>Hi there,</p>
+              <p>You've been invited to collaborate on the live session: <strong>${session.title || session.wheelTitle}</strong></p>
+
+              <div style="background-color: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 8px;">
+                <h3 style="margin-top: 0;">Session Details:</h3>
+                <p><strong>Room Code:</strong> ${session.roomCode}</p>
+                <p><strong>Organizer:</strong> ${activeUser.displayName || activeUser.email}</p>
+                <p><strong>Link:</strong> <a href="${session.shareUrl || window.location.href}" target="_blank">Join Session</a></p>
+              </div>
+
+              <p>As a collaborator, you'll be able to:</p>
+              <ul>
+                <li>Control the wheel (spin, pause, reset)</li>
+                <li>Edit wheel settings and items</li>
+                <li>Manage participants</li>
+              </ul>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${session.shareUrl || window.location.href}" style="background-color: #8e0b16; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Join Session</a>
+              </div>
+
+              <p style="color: #666; font-size: 14px;">
+                This invitation expires in 7 days. If you have any questions, contact the session organizer.
+              </p>
+            </div>
+          `,
+          text: `You've been invited to collaborate on "${session.title || session.wheelTitle}". Room code: ${session.roomCode}. Join here: ${session.shareUrl || window.location.href}`
+        }
+
+        // Send the email using the email service
+        await fetch('/api/send-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(emailContent),
+        })
+
+        console.log("📧 Collaborator invitation email sent to:", collaboratorEmail.trim())
+
+      } catch (emailError) {
+        console.warn("Failed to send email notification:", emailError)
+        // Don't fail the invitation if email fails - we've saved the invitation successfully
+      }
+
+      toast({
+        title: "✅ Invitation Sent!",
+        description: `Collaborator invitation sent to ${collaboratorEmail}`,
+      })
+
+      // Clear the input
+      setCollaboratorEmail("")
+
+      // Call callback if provided
+      if (onInvitationSent) {
+        onInvitationSent()
+      }
+
+    } catch (error: any) {
+      console.error("❌ Error sending collaborator invitation:", error)
+      toast({
+        title: "Error",
+        description: "Failed to send collaborator invitation. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsInvitingCollaborator(false)
+    }
+  }
+
+  // Show component if we have invitations OR if we have a session to send invitations
+  const shouldShow = invitations.length > 0 ||
+                     (showSentInvitations && sentInvitations.length > 0) ||
+                     (session && session.id)
+
+  if (!shouldShow) {
+    return null
   }
 
   return (
     <div className="mb-6">
       {/* Live Room Invitations Card */}
-      <Card className={cn(
-        "border-2 border-red-500 bg-red-50 shadow-xl transition-all duration-300",
-        invitations.some(inv => inv.requiresImmediateAttention) 
-          ? "animate-pulse border-yellow-400 bg-yellow-50" 
-          : "border-red-500 bg-red-50"
-      )}>
-        <CardHeader 
+      <Card className="border-2 border-red-500 bg-red-50 shadow-xl">
+        <CardHeader
           className="bg-gradient-to-r from-red-600 to-red-700 text-white cursor-pointer hover:from-red-700 hover:to-red-800 transition-all"
           onClick={() => setIsExpanded(!isExpanded)}
         >
@@ -461,11 +873,29 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
                 <Radio className="h-6 w-6" />
               </div>
               <div className="flex items-center gap-2">
-                <Bell className="h-5 w-5 animate-bounce" />
+                <Bell className="h-5 w-5" />
                 Live Room Invitations
-                <Badge variant="destructive" className="bg-yellow-500 text-black font-bold">
-                  {invitations.length} NEW
-                </Badge>
+                {invitations.length > 0 && (
+                  <Badge variant="destructive" className="bg-yellow-500 text-black font-bold">
+                    {invitations.length} RECEIVED
+                  </Badge>
+                )}
+                {showSentInvitations && sentInvitations.length > 0 && (
+                  <Badge variant="secondary" className="bg-orange-500 text-white font-bold">
+                    {sentInvitations.length} SENT
+                  </Badge>
+                )}
+                {/* Enhanced Collaborative Status Indicator */}
+                {collaborativeManager && (
+                  <Badge
+                    variant="secondary"
+                    className="bg-green-500 text-white border border-green-400 animate-pulse"
+                    title="Enhanced collaborative management active"
+                  >
+                    <Users className="h-3 w-3 mr-1" />
+                    ENHANCED
+                  </Badge>
+                )}
               </div>
             </CardTitle>
             <div className="flex items-center gap-2">
@@ -484,11 +914,74 @@ export function LiveRoomInvitations({ user }: LiveRoomInvitationsProps) {
           </div>
           <div className="text-white/90">
             You have been invited to collaborate on live sessions! Click to view details.
+            {collaborativeManager && (
+              <div className="mt-1 text-green-200 text-sm">
+                🔧 Enhanced collaborative management provides advanced collaboration features
+              </div>
+            )}
           </div>
         </CardHeader>
 
         {isExpanded && (
           <CardContent className="p-6">
+            {/* Send Invitation Section - for organizers with active session */}
+            {session && session.id && (
+              <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-xl">
+                <div className="flex items-center gap-3 mb-3">
+                  <UserPlus className="h-5 w-5 text-purple-600" />
+                  <h3 className="text-lg font-semibold text-purple-900">Send Collaborator Invitation</h3>
+                  <Badge variant="outline" className="bg-purple-100 text-purple-700 border-purple-300">
+                    Active Session
+                  </Badge>
+                </div>
+
+                <p className="text-sm text-purple-700 mb-4">
+                  Invite other organizers to collaborate on: <strong className="text-purple-900">"{session.title || session.wheelTitle}"</strong>
+                  <br />
+                  They'll receive full collaboration permissions for live session management.
+                </p>
+
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <Label htmlFor="collaborator-email" className="text-sm font-medium text-purple-900">
+                      Collaborator Email Address
+                    </Label>
+                    <Input
+                      id="collaborator-email"
+                      type="email"
+                      placeholder="Enter organizer email..."
+                      value={collaboratorEmail}
+                      onChange={(e) => setCollaboratorEmail(e.target.value)}
+                      className="mt-1 border-purple-300 focus:border-purple-500 focus:ring-purple-500"
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !isInvitingCollaborator) {
+                          handleSendInvitation()
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <Button
+                    onClick={handleSendInvitation}
+                    disabled={isInvitingCollaborator}
+                    className="self-end bg-purple-600 hover:bg-purple-700 text-white"
+                  >
+                    {isInvitingCollaborator ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-1" />
+                        Send Invitation
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 max-h-96 overflow-y-auto">
               {invitations.map((invitation) => (
                 <Card key={invitation.id} className="border-l-4 border-l-red-500 shadow-lg bg-white">

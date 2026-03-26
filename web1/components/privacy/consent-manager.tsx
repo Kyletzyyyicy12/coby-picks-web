@@ -16,7 +16,6 @@ interface ConsentData {
   userId: string
   teacherConsent: boolean
   dataProcessingConsent: boolean
-  communicationConsent: boolean
   consentDate: Date
   ipAddress?: string
   userAgent?: string
@@ -35,8 +34,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
   const [loading, setLoading] = useState(true)
   const [formData, setFormData] = useState({
     teacherConsent: false,
-    dataProcessingConsent: false,
-    communicationConsent: false
+    dataProcessingConsent: false
   })
 
   const schoolColors = {
@@ -52,7 +50,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
   const checkExistingConsent = async () => {
     try {
       const consentDoc = await getDoc(doc(db, "privacyConsents", user.uid))
-      
+
       if (consentDoc.exists()) {
         const data = consentDoc.data()
         setConsent({
@@ -74,7 +72,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
     if (!formData.teacherConsent || !formData.dataProcessingConsent) {
       toast({
         title: "Required Consent Missing",
-        description: "Teacher verification and data processing consent are required to use this system",
+        description: "User verification and data processing consent are required to use this system",
         variant: "destructive"
       })
       return
@@ -85,7 +83,6 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
         userId: user.uid,
         teacherConsent: formData.teacherConsent,
         dataProcessingConsent: formData.dataProcessingConsent,
-        communicationConsent: formData.communicationConsent,
         consentDate: new Date(),
         version: "1.0",
         ipAddress: await getClientIP(),
@@ -99,7 +96,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
 
       setConsent(consentData)
       setIsDialogOpen(false)
-      
+
       toast({
         title: "Consent Recorded",
         description: "Your privacy preferences have been saved",
@@ -136,13 +133,12 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
         ...consent,
         teacherConsent: false,
         dataProcessingConsent: false,
-        communicationConsent: false,
         revokedDate: serverTimestamp(),
         status: "revoked"
       })
 
       setConsent(null)
-      
+
       toast({
         title: "Consent Revoked",
         description: "Your consent has been revoked. You will need to provide consent again to use the system.",
@@ -182,7 +178,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-center gap-2">
                 {consent.teacherConsent ? (
                   <Check className="h-5 w-5 text-green-500" />
@@ -190,7 +186,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
                   <AlertTriangle className="h-5 w-5 text-red-500" />
                 )}
                 <div>
-                  <p className="font-medium">Teacher Verification</p>
+                  <p className="font-medium">User Verification</p>
                   <p className="text-sm text-muted-foreground">
                     {consent.teacherConsent ? "Verified" : "Not verified"}
                   </p>
@@ -210,20 +206,6 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
                   </p>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                {consent.communicationConsent ? (
-                  <Check className="h-5 w-5 text-green-500" />
-                ) : (
-                  <Info className="h-5 w-5 text-gray-500" />
-                )}
-                <div>
-                  <p className="font-medium">Communications</p>
-                  <p className="text-sm text-muted-foreground">
-                    {consent.communicationConsent ? "Allowed" : "Declined"}
-                  </p>
-                </div>
-              </div>
             </div>
 
             <div className="flex items-center justify-between pt-4 border-t">
@@ -232,7 +214,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
                 <span>Consented on {consent.consentDate.toLocaleDateString()}</span>
                 <Badge variant="outline">v{consent.version}</Badge>
               </div>
-              
+
               <Button
                 variant="outline"
                 size="sm"
@@ -246,9 +228,9 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
         </Card>
       )}
 
-      {/* Consent Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+      {/* Consent Dialog - Cannot be closed without making a choice */}
+      <Dialog open={isDialogOpen} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-[600px] [&>button]:hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2" style={{ color: schoolColors.primary }}>
               <Shield className="h-6 w-6" />
@@ -260,23 +242,23 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
           </DialogHeader>
 
           <div className="space-y-6 py-4">
-            {/* Teacher Verification */}
+            {/* User Verification */}
             <div className="space-y-3">
               <div className="flex items-start gap-3">
                 <Checkbox
                   id="teacher-consent"
                   checked={formData.teacherConsent}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked) =>
                     setFormData(prev => ({ ...prev, teacherConsent: checked as boolean }))
                   }
                 />
                 <div className="space-y-1">
                   <label htmlFor="teacher-consent" className="font-medium text-sm cursor-pointer">
-                    Teacher/Educator Verification *
+                    User *
                   </label>
                   <p className="text-sm text-muted-foreground">
-                    I confirm that I am a teacher, educator, or authorized school personnel using this system 
-                    for legitimate educational purposes. I understand that this system is designed for 
+                    I confirm that I am a teacher, educator, or authorized school personnel using this system
+                    for legitimate educational purposes. I understand that this system is designed for
                     classroom and educational activities.
                   </p>
                 </div>
@@ -289,7 +271,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
                 <Checkbox
                   id="data-consent"
                   checked={formData.dataProcessingConsent}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked) =>
                     setFormData(prev => ({ ...prev, dataProcessingConsent: checked as boolean }))
                   }
                 />
@@ -298,31 +280,9 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
                     Data Processing Consent *
                   </label>
                   <p className="text-sm text-muted-foreground">
-                    I consent to the processing of participant data (names, emails, contact information) 
-                    for the purpose of conducting randomizer activities. Data will be stored securely 
+                    I consent to the processing of participant data (names, emails, contact information)
+                    for the purpose of conducting randomizer activities. Data will be stored securely
                     and used only for educational purposes.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Communication */}
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <Checkbox
-                  id="communication-consent"
-                  checked={formData.communicationConsent}
-                  onCheckedChange={(checked) => 
-                    setFormData(prev => ({ ...prev, communicationConsent: checked as boolean }))
-                  }
-                />
-                <div className="space-y-1">
-                  <label htmlFor="communication-consent" className="font-medium text-sm cursor-pointer">
-                    Communication Preferences (Optional)
-                  </label>
-                  <p className="text-sm text-muted-foreground">
-                    I agree to receive system notifications, updates, and educational communications 
-                    related to my use of Coby Picks.
                   </p>
                 </div>
               </div>
@@ -341,7 +301,7 @@ export function ConsentManager({ user, onConsentComplete, showDialog = false }: 
             </div>
 
             <p className="text-xs text-muted-foreground">
-              * Required fields. By continuing, you acknowledge that you have read and understood 
+              * Required fields. By continuing, you acknowledge that you have read and understood
               our privacy policy and agree to the terms outlined above.
             </p>
           </div>

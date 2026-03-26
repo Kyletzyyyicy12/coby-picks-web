@@ -7,17 +7,17 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/hooks/use-toast"
 import { db, auth } from "@/lib/firebase"
-import { collection, getDocs, query, where, orderBy, limit, deleteDoc, doc, getDoc } from "firebase/firestore"
+import { collection, getDocs, query, where, orderBy, limit, deleteDoc, doc, getDoc, updateDoc } from "firebase/firestore"
 import { signOut } from "firebase/auth"
 import { SpinHistoryManager } from "@/components/teacher/spin-history-manager"
 import { SavedWheelsManager } from "@/components/teacher/saved-wheels-manager"
 import { ActivityConfiguration } from "@/components/organizer/activity-configuration"
-import { WheelTypeProvider } from "@/components/providers/wheel-type-provider"
 import { ParticipantPickerWheelGallery } from "@/components/participant/participant-picker-wheel-gallery"
 
 import { AnnouncementDisplay } from "@/components/shared/announcement-display"
 import { WebCollaborationNotifications } from "@/components/shared/web-collaboration-notifications"
 import { LiveRoomInvitations } from "@/components/shared/live-room-invitations"
+import { ConsentManager } from "@/components/privacy/consent-manager"
 import {
   Users,
   Calendar,
@@ -113,8 +113,11 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
   const [loading, setLoading] = useState(true)
   const [activeModal, setActiveModal] = useState<string | null>(null)
   const [showActivityConfiguration, setShowActivityConfiguration] = useState(false)
+  const [showRegularActivityConfiguration, setShowRegularActivityConfiguration] = useState(false)
   const [showOrganizerSoloGallery, setShowOrganizerSoloGallery] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
+  const [showConsentDialog, setShowConsentDialog] = useState(false)
+  const [hasConsent, setHasConsent] = useState(false)
 
   // School colors
   const schoolColors = {
@@ -145,7 +148,14 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
       }, 1000)
     }
 
+    // Check if returning from saved wheels
     if (typeof window !== 'undefined') {
+      const returnToSavedWheels = sessionStorage.getItem('returnToSavedWheels')
+      if (returnToSavedWheels === 'true') {
+        setActiveModal('saved-wheels')
+        sessionStorage.removeItem('returnToSavedWheels')
+      }
+
       window.addEventListener('sessionEnded', handleSessionEnded as EventListener)
 
       return () => {
@@ -199,15 +209,13 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
               const sessionDoc = await getDoc(doc(db, "liveDrawSessions", activity.liveSessionId))
               if (sessionDoc.exists()) {
                 const sessionData = sessionDoc.data()
-                // Enhanced session status checking:
-                // - Active if isActive AND isLive (normal active state)
-                // - OR if organizer is temporarily away but session is still joinable
-                const isSessionActive = (sessionData.isActive && sessionData.isLive) || 
-                                      (sessionData.isActive && sessionData.teacherPresence?.temporarilyAway)
                 
-                // Don't include explicitly ended sessions
+                // Session is considered active if it exists and hasn't been explicitly ended
+                // This ensures activities remain visible even if organizer accidentally closes the wheel
+                // Only when organizer explicitly ends the session should it disappear
                 const isExplicitlyEnded = sessionData.endedExplicitly === true
-                const shouldShowSession = isSessionActive && !isExplicitlyEnded
+                const sessionStillActive = sessionData.isActive !== false // Session is active by default unless explicitly set to false
+                const shouldShowSession = sessionStillActive && !isExplicitlyEnded
                 
                 console.log(`📊 Activity ${activity.id} live session status:`, {
                   sessionId: activity.liveSessionId,
@@ -215,6 +223,7 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
                   isLive: sessionData.isLive,
                   temporarilyAway: sessionData.teacherPresence?.temporarilyAway,
                   endedExplicitly: sessionData.endedExplicitly,
+                  sessionStillActive: sessionStillActive,
                   shouldShowSession: shouldShowSession,
                   roomCode: sessionData.roomCode,
                   viewerCount: sessionData.viewerCount || 0
@@ -258,7 +267,6 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
       const pickerWheelActivities = activities.filter(a =>
         a.wheelType && (
           a.wheelType.includes('picker') ||
-          a.wheelType === 'basic-picker' ||
           a.wheelTitle?.includes('Picker')
         )
       )
@@ -277,7 +285,6 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
         // Check if it's a Picker Wheel Gallery activity
         const isPickerWheelActivity = activity.wheelType && (
           activity.wheelType.includes('picker') ||
-          activity.wheelType === 'basic-picker' ||
           activity.wheelTitle?.includes('Picker')
         )
 
@@ -424,11 +431,11 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
 
   const quickActions = [
     {
-      title: "Browse Picker Wheels (Solo)",
+      title: "Browse Picker Wheels",
       description: "Use wheels in solo mode - no live session needed",
       icon: Target,
       action: () => setShowOrganizerSoloGallery(true),
-      color: "#2563eb" // Blue color for solo mode
+      color: "#8e0b16" // Match participants dashboard color
     },
     {
       title: "Create Live Activity",
@@ -469,14 +476,24 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
   // Show ActivityConfiguration if requested
   if (showActivityConfiguration) {
     return (
-      <WheelTypeProvider userRole="organizer">
-        <ActivityConfiguration 
-          user={user}
-          userName={getOrganizerName()}
-          autoEnableLiveSession={true} // Automatically enable live sessions since this is for creating live activities
-          onCancel={() => setShowActivityConfiguration(false)}
-        />
-      </WheelTypeProvider>
+      <ActivityConfiguration
+        user={user}
+        userName={getOrganizerName()}
+        autoEnableLiveSession={true} // Automatically enable live sessions since this is for creating live activities
+        onCancel={() => setShowActivityConfiguration(false)}
+      />
+    )
+  }
+
+  // Show Regular ActivityConfiguration if requested
+  if (showRegularActivityConfiguration) {
+    return (
+      <ActivityConfiguration
+        user={user}
+        userName={getOrganizerName()}
+        autoEnableLiveSession={false} // Don't enable live sessions for regular activities
+        onCancel={() => setShowRegularActivityConfiguration(false)}
+      />
     )
   }
 
@@ -485,12 +502,11 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: schoolColors.background }}>
         {/* Solo Wheel Gallery */}
-        <WheelTypeProvider userRole="organizer">
-          <ParticipantPickerWheelGallery
-            user={user}
-            onBack={() => setShowOrganizerSoloGallery(false)}
-          />
-        </WheelTypeProvider>
+        <ParticipantPickerWheelGallery
+          user={user}
+          onBack={() => setShowOrganizerSoloGallery(false)}
+          userRole="organizer"
+        />
       </div>
     )
   }
@@ -499,7 +515,7 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
     <div className="min-h-screen" style={{ backgroundColor: schoolColors.background }}>
       {/* Welcome Banner */}
       <div 
-        className="w-full py-8 px-6 mb-8"
+        className="w-full py-10 px-6 mb-8 shadow-lg"
         style={{ 
           backgroundColor: schoolColors.secondary,
           background: `linear-gradient(135deg, ${schoolColors.secondary} 0%, ${schoolColors.primary} 100%)`
@@ -507,18 +523,33 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
       >
         <div className="container mx-auto">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-white mb-2">
-                👤 Organizer Dashboard, {getOrganizerName()}!
-              </h1>
-              <p className="text-white/90 text-lg">
-                Manage your randomizer activities and engage your participants
-              </p>
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-3 bg-white/15 rounded-lg backdrop-blur-sm">
+                  <span className="text-4xl">👤</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl md:text-4xl font-bold text-white mb-1">
+                    Welcome to Coby Picks!
+                  </h1>
+                  <p className="text-white/90 text-lg">
+                    Hello, {getOrganizerName()}!
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="text-xs px-3 py-1" style={{ backgroundColor: 'rgba(255, 255, 255, 0.2)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.3)' }}>
+                  Organizer Dashboard
+                </Badge>
+                <Badge className="text-xs px-3 py-1" style={{ backgroundColor: '#66181E', color: 'white' }}>
+                  🎯 Manage Activities & Live Sessions
+                </Badge>
+              </div>
             </div>
             <div className="flex items-center gap-4">
               <AnnouncementDisplay user={user} userRole="organizer" />
-              
-              {/* Account Dropdown Menu */}
+
+               {/* Account Dropdown Menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -557,6 +588,38 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
                     <span>My Profile</span>
                   </DropdownMenuItem>
 
+                  <DropdownMenuItem
+                    className="cursor-pointer py-2 px-3 hover:bg-blue-50 text-blue-600"
+                    onClick={async () => {
+                      try {
+                        // Update user role in Firestore
+                        const userDocRef = doc(db, "users", user.uid)
+                        await updateDoc(userDocRef, {
+                          role: "participant",
+                          lastRoleSelection: new Date()
+                        })
+
+                        toast({
+                          title: "Role Switched",
+                          description: "You are now set as a Participant.",
+                        })
+
+                        // Navigate to participant dashboard
+                        window.location.href = "/participants"
+                      } catch (error) {
+                        console.error("Error switching role:", error)
+                        toast({
+                          title: "Error",
+                          description: "Failed to switch role. Please try again.",
+                          variant: "destructive"
+                        })
+                      }
+                    }}
+                  >
+                    <Users className="mr-2 h-4 w-4" />
+                    <span>Switch to Participant</span>
+                  </DropdownMenuItem>
+
                   <DropdownMenuSeparator />
 
                   <DropdownMenuItem
@@ -583,32 +646,38 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
         <WebCollaborationNotifications />
         {/* Quick Actions */}
         <div className="mb-8">
-          <h2 className="text-2xl font-bold mb-6" style={{ color: schoolColors.primary }}>
-            🧭 Quick Actions
-          </h2>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: schoolColors.primary }}>
+              <Target className="h-6 w-6" />
+              Quick Actions
+            </h2>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {quickActions.map((action, index) => {
               const IconComponent = action.icon
               return (
                 <Card
                   key={index}
-                  className="hover:shadow-lg transition-all duration-200 cursor-pointer border-2 hover:border-opacity-50"
-                  style={{ borderColor: action.color }}
+                  className="group hover:shadow-xl transition-all duration-300 cursor-pointer border-2 bg-white hover:scale-105"
+                  style={{ borderColor: action.color, borderWidth: '2px' }}
                   onClick={action.action}
                 >
                   <CardContent className="p-6">
                     <div className="flex items-center gap-4">
                       <div
-                        className="p-3 rounded-lg"
-                        style={{ backgroundColor: `${action.color}15`, color: action.color }}
+                        className="p-4 rounded-xl transition-transform group-hover:scale-110"
+                        style={{ 
+                          backgroundColor: `${action.color}15`,
+                          border: `2px solid ${action.color}20`
+                        }}
                       >
-                        <IconComponent className="h-6 w-6" />
+                        <IconComponent className="h-7 w-7" style={{ color: action.color }} />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-lg" style={{ color: schoolColors.primary }}>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-base mb-1" style={{ color: schoolColors.primary }}>
                           {action.title}
                         </h3>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-gray-600 leading-relaxed">
                           {action.description}
                         </p>
                       </div>
@@ -741,6 +810,25 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
+                        {/* Wheel Information */}
+                        {(activity.wheelType || activity.wheelTitle) && (
+                          <div className="p-3 bg-gray-50 rounded-lg border">
+                            <div className="text-sm font-medium text-gray-700 mb-2">🎯 Wheel Used</div>
+                            <div className="space-y-1">
+                              {activity.wheelType && (
+                                <div className="text-xs">
+                                  <span className="font-medium">Type:</span> {activity.wheelType}
+                                </div>
+                              )}
+                              {activity.wheelTitle && (
+                                <div className="text-xs">
+                                  <span className="font-medium">Name:</span> {activity.wheelTitle}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-2 gap-4 text-sm text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Users className="h-4 w-4" />
@@ -964,8 +1052,15 @@ export function OrganizerDashboard({ user }: OrganizerDashboardProps) {
         </DialogContent>
       </Dialog>
 
-
-
+      {/* Consent Dialog */}
+      <ConsentManager
+        user={user}
+        showDialog={showConsentDialog}
+        onConsentComplete={(consented) => {
+          setHasConsent(consented)
+          setShowConsentDialog(false)
+        }}
+      />
 
     </div>
   )

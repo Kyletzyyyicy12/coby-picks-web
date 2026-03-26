@@ -419,7 +419,7 @@ export function LiveViewer({ sessionId, studentName }: LiveViewerProps) {
               <div className="space-y-4">
                 <div className="space-y-4">
                   <div className="flex items-center justify-center gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
-                    <div className="text-4xl">🏆</div>
+                    <div className="text-4xl">✓</div>
                     <div>
                       <p className="text-sm text-muted-foreground">
                         Congratulations to our winner{session.winners.length > 1 ? 's' : ''}!

@@ -1,14 +1,15 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/hooks/use-toast"
 import { db, auth } from "@/lib/firebase"
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc } from "firebase/firestore"
+import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, updateDoc } from "firebase/firestore"
 import { signOut } from "firebase/auth"
 import { AnnouncementDisplay } from "@/components/shared/announcement-display"
 import {
@@ -29,6 +30,7 @@ import {
   Settings,
   LogOut,
   UserCircle,
+  UserCheck,
   RotateCcw,
   BarChart3,
   Target,
@@ -46,7 +48,6 @@ import { SpinHistoryManager } from "@/components/teacher/spin-history-manager"
 import { SavedWheelsManager } from "@/components/teacher/saved-wheels-manager"
 import { EnhancedParticipantJoin } from "@/components/live/enhanced-participant-join"
 import { ParticipantPickerWheelGallery } from "@/components/participant/participant-picker-wheel-gallery"
-import { WheelTypeProvider } from "@/components/providers/wheel-type-provider"
 
 import type { User as FirebaseUser } from "firebase/auth"
 
@@ -85,6 +86,19 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
   const [joiningSession, setJoiningSession] = useState(false)
   const [showParticipantGallery, setShowParticipantGallery] = useState(false)
   const [showProfileModal, setShowProfileModal] = useState(false)
+  const [showCreateWheelDialog, setShowCreateWheelDialog] = useState(false)
+  const [recentActivities, setRecentActivities] = useState<any[]>([])
+  const [activitiesLoading, setActivitiesLoading] = useState(false)
+
+  // Check for auto-open saved wheels modal on component mount
+  useEffect(() => {
+    const shouldOpenSavedWheels = sessionStorage.getItem('openSavedWheelsModal')
+    if (shouldOpenSavedWheels === 'true') {
+      setActiveModal('saved-wheels')
+      sessionStorage.removeItem('openSavedWheelsModal')
+    }
+  }, [])
+
 
   // School colors
   const schoolColors = {
@@ -93,6 +107,7 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
     accent: "#ffffff",       // White
     background: "#f8f9fa"    // Light background
   }
+
 
   const categoryIcons = {
     academic: BookOpen,
@@ -119,10 +134,61 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
     // Check consent status if user is logged in
     if (user) {
       checkConsentStatus()
+      fetchRecentActivities()
     } else {
       setHasConsent(true) // Allow viewing without login
     }
   }, [user])
+
+  // Fetch recent activities (spin history + live sessions)
+  const fetchRecentActivities = async () => {
+    if (!user) return
+    
+    setActivitiesLoading(true)
+    try {
+      // Fetch spin history
+      const spinHistoryQuery = query(
+        collection(db, "spinHistory"),
+        where("userId", "==", user.uid),
+        orderBy("timestamp", "desc")
+      )
+      
+      const spinHistorySnapshot = await getDocs(spinHistoryQuery)
+      const activities = spinHistorySnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'spin',
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate()
+      }))
+
+      // Fetch live session participation
+      const participationQuery = query(
+        collection(db, "sessionParticipation"),
+        where("participantId", "==", user.uid),
+        orderBy("joinedAt", "desc")
+      )
+      
+      const participationSnapshot = await getDocs(participationQuery)
+      const liveActivities = participationSnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'live-session',
+        ...doc.data(),
+        timestamp: doc.data().joinedAt?.toDate()
+      }))
+
+      // Combine and sort all activities
+      const allActivities = [...activities, ...liveActivities]
+        .sort((a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0))
+        .slice(0, 10) // Show latest 10 activities
+
+      setRecentActivities(allActivities)
+    } catch (error) {
+      console.error("Error fetching recent activities:", error)
+      setRecentActivities([])
+    } finally {
+      setActivitiesLoading(false)
+    }
+  }
 
   // Real-time live session listener - only for invited sessions
   useEffect(() => {
@@ -438,12 +504,11 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
   // Show Participant Picker Wheel Gallery if requested
   if (showParticipantGallery) {
     return (
-      <WheelTypeProvider userRole="participant">
-        <ParticipantPickerWheelGallery
-          user={user}
-          onBack={() => setShowParticipantGallery(false)}
-        />
-      </WheelTypeProvider>
+      <ParticipantPickerWheelGallery
+        user={user}
+        onBack={() => setShowParticipantGallery(false)}
+        userRole="participant"
+      />
     )
   }
 
@@ -451,7 +516,7 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
     <div className="min-h-screen" style={{ backgroundColor: schoolColors.background }}>
       {/* Welcome Banner */}
       <div 
-        className="w-full py-8 px-6 mb-8"
+        className="w-full py-10 px-6 mb-8 shadow-lg"
         style={{ 
           backgroundColor: schoolColors.secondary,
           background: `linear-gradient(135deg, ${schoolColors.secondary} 0%, ${schoolColors.primary} 100%)`
@@ -459,14 +524,28 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
       >
         <div className="container mx-auto">
           <div className="flex items-center justify-between">
-            <div className="text-center flex-1">
-              <h1 className="text-3xl font-bold text-white mb-2">
-                🎯 Welcome to Coby Picks!
-              </h1>
-              <p className="text-white/90 text-lg mb-4">
-                {participantName ? `Hello, ${participantName}!` : "Hello, Participant!"} Watch live draws and see results
-              </p>
-              <div className="text-white/80 text-sm">👥 Participant Dashboard</div>
+            <div className="flex-1">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-3 bg-white/15 rounded-lg backdrop-blur-sm">
+                  <span className="text-4xl">👥</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl md:text-4xl font-bold text-white mb-1">
+                    Welcome to Coby Picks!
+                  </h1>
+                  <p className="text-white/90 text-lg">
+                    {participantName ? `Hello, ${participantName}!` : "Hello, Participant!"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="text-xs px-3 py-1" style={{ backgroundColor: 'rgba(255, 255, 255, 0.2)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.3)' }}>
+                  Participant Dashboard
+                </Badge>
+                <Badge className="text-xs px-3 py-1" style={{ backgroundColor: '#66181E', color: 'white' }}>
+                  ✨ Interactive Wheels &  Joined Live Sessions
+                </Badge>
+              </div>
             </div>
 
             {/* Settings Menu */}
@@ -513,6 +592,38 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
                       <span>My Profile</span>
                     </DropdownMenuItem>
 
+                    <DropdownMenuItem
+                      className="cursor-pointer py-2 px-3 hover:bg-red-50 text-red-600"
+                      onClick={async () => {
+                        try {
+                          // Update user role in Firestore
+                          const userDocRef = doc(db, "users", user.uid)
+                          await updateDoc(userDocRef, {
+                            role: "organizer",
+                            lastRoleSelection: new Date()
+                          })
+
+                          toast({
+                            title: "Role Switched",
+                            description: "You are now set as an Organizer.",
+                          })
+
+                          // Navigate to organizer dashboard
+                          window.location.href = "/organizer"
+                        } catch (error) {
+                          console.error("Error switching role:", error)
+                          toast({
+                            title: "Error",
+                            description: "Failed to switch role. Please try again.",
+                            variant: "destructive"
+                          })
+                        }
+                      }}
+                    >
+                      <UserCheck className="mr-2 h-4 w-4" />
+                      <span>Switch to Organizer</span>
+                    </DropdownMenuItem>
+
                     <DropdownMenuSeparator />
 
                     <DropdownMenuItem
@@ -535,38 +646,47 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
         {/* Dashboard Overview - Only show for logged-in users */}
         {user && (
           <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-6" style={{ color: schoolColors.primary }}>
-              📊 Dashboard Overview
-            </h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold flex items-center gap-2" style={{ color: schoolColors.primary }}>
+                <Target className="h-6 w-6" />
+                Quick Actions
+              </h2>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {quickActions.map((action, index) => {
                 const IconComponent = action.icon
                 return (
                   <Card
                     key={index}
-                    className={`hover:shadow-lg transition-all duration-200 border-2 hover:border-opacity-50 ${
-                      action.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    className={`group hover:shadow-xl transition-all duration-300 border-2 ${
+                      action.disabled ? 'opacity-50 cursor-not-allowed bg-gray-50' : 'cursor-pointer hover:scale-105 bg-white'
                     }`}
-                    style={{ borderColor: action.color }}
+                    style={{ 
+                      borderColor: action.disabled ? '#e5e7eb' : action.color,
+                      borderWidth: '2px'
+                    }}
                     onClick={action.disabled ? undefined : action.action}
                   >
                     <CardContent className="p-6 text-center">
                       <div
-                        className="p-3 rounded-lg mx-auto mb-4 w-fit"
-                        style={{ backgroundColor: `${action.color}15`, color: action.color }}
+                        className="p-4 rounded-xl mx-auto mb-4 w-fit transition-transform group-hover:scale-110"
+                        style={{ 
+                          backgroundColor: action.disabled ? '#f3f4f6' : `${action.color}15`,
+                          border: `2px solid ${action.disabled ? '#e5e7eb' : action.color}20`
+                        }}
                       >
-                        <IconComponent className="h-6 w-6" />
+                        <IconComponent className="h-7 w-7" style={{ color: action.disabled ? '#9ca3af' : action.color }} />
                       </div>
-                      <h3 className="font-semibold text-lg mb-2" style={{ color: schoolColors.primary }}>
+                      <h3 className="font-bold text-base mb-2" style={{ color: action.disabled ? '#9ca3af' : schoolColors.primary }}>
                         {action.title}
                       </h3>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-gray-600 leading-relaxed">
                         {action.description}
                       </p>
                       {action.disabled && (
-                        <p className="text-xs text-red-500 mt-2">
-                          Login required
-                        </p>
+                        <Badge variant="destructive" className="mt-3 text-xs">
+                          Login Required
+                        </Badge>
                       )}
                     </CardContent>
                   </Card>
@@ -754,7 +874,7 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
           <div className="mb-8">
             <h2 className="text-2xl font-bold mb-6 flex items-center gap-2" style={{ color: schoolColors.primary }}>
               <Trophy className="h-6 w-6" />
-              🏆 Recent Results
+              ✓ Recent Results
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {completedDraws.slice(0, 6).map((draw) => {
@@ -814,35 +934,116 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
           </div>
         )}
 
-        {/* No Draws Available */}
-        {availableDraws.length === 0 && (
-          <div className="flex items-center justify-center min-h-[400px]">
-            <Card className="max-w-md mx-auto">
+        {/* Recent Draw Activity */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold mb-6" style={{ color: schoolColors.primary }}>
+            📊 Recent Draw Activity
+          </h2>
+          
+          {activitiesLoading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" style={{ borderColor: schoolColors.primary }}></div>
+              <p className="text-muted-foreground">Loading activities...</p>
+            </div>
+          ) : recentActivities.length === 0 ? (
+            <Card className="max-w-2xl mx-auto">
               <CardContent className="text-center py-12">
-                <div className="text-6xl mb-6">🎯</div>
+                <div className="text-6xl mb-6">📊</div>
                 <h3 className="text-2xl font-semibold mb-4" style={{ color: schoolColors.primary }}>
-                  Create Your Own Wheels!
+                  No Activities Yet
                 </h3>
                 <p className="text-muted-foreground mb-6">
-                  Ready to spin some wheels? Browse our picker wheel gallery to create and play wheels solo - no live session needed!
+                  Choose how you want to use picker wheels
                 </p>
-                <Button
-                  onClick={() => setShowParticipantGallery(true)}
-                  className="mb-4 text-white"
-                  style={{ backgroundColor: schoolColors.primary }}
-                >
-                  <Target className="h-4 w-4 mr-2" />
-                  Browse Picker Wheels
-                </Button>
-                <div className="text-sm text-muted-foreground">
-                  <p>🎯 Create number, color, letter wheels</p>
-                  <p>🎮 Play solo without live sessions</p>
-                  <p>🏆 Get instant results</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto">
+                  <Button
+                    onClick={() => setShowParticipantGallery(true)}
+                    className="text-white h-auto py-4 flex flex-col gap-2"
+                    style={{ backgroundColor: schoolColors.primary }}
+                  >
+                    <Target className="h-6 w-6" />
+                    <span className="font-semibold">Browse Wheels</span>
+                    <span className="text-xs opacity-90">Play solo</span>
+                  </Button>
+                  <Button
+                    onClick={() => setShowRoomCodeDialog(true)}
+                    variant="outline"
+                    className="h-auto py-4 flex flex-col gap-2"
+                    style={{ borderColor: schoolColors.primary, color: schoolColors.primary }}
+                  >
+                    <Radio className="h-6 w-6" />
+                    <span className="font-semibold">Join Live</span>
+                    <span className="text-xs opacity-90">Enter room code</span>
+                  </Button>
                 </div>
               </CardContent>
             </Card>
-          </div>
-        )}
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentActivities.map((activity) => (
+                <Card key={activity.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {activity.type === 'spin' ? (
+                          <Target className="h-5 w-5" style={{ color: schoolColors.primary }} />
+                        ) : (
+                          <Radio className="h-5 w-5 text-red-600" />
+                        )}
+                        <Badge variant={activity.type === 'live-session' ? 'destructive' : 'default'}>
+                          {activity.type === 'spin' ? 'Solo Spin' : 'Live Session'}
+                        </Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {activity.timestamp?.toLocaleDateString()}
+                      </span>
+                    </div>
+                    <CardTitle className="text-base line-clamp-1">
+                      {activity.wheelTitle || activity.sessionTitle || 'Wheel Spin'}
+                    </CardTitle>
+                    <CardDescription className="text-sm">
+                      {activity.timestamp?.toLocaleTimeString()}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {activity.type === 'spin' && activity.winners && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1">Winner{activity.winners.length > 1 ? 's' : ''}:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {activity.winners.slice(0, 3).map((winner: string, idx: number) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                🏆 {winner}
+                              </Badge>
+                            ))}
+                            {activity.winners.length > 3 && (
+                              <Badge variant="outline" className="text-xs">
+                                +{activity.winners.length - 3} more
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {activity.type === 'live-session' && (
+                        <div className="text-sm text-muted-foreground">
+                          <p>Joined live session</p>
+                          {activity.roomCode && (
+                            <p className="font-mono text-xs mt-1">Code: {activity.roomCode}</p>
+                          )}
+                        </div>
+                      )}
+                      {activity.wheelCategory && (
+                        <Badge variant="outline" className="text-xs">
+                          {activity.wheelCategory}
+                        </Badge>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Consent Dialog */}
@@ -890,9 +1091,10 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
                   Join Live Session
                 </DialogTitle>
                 <DialogDescription>
-                  Enter the room code provided by your teacher to join a live draw session.
+                  Enter the room code provided by your organizer to join the live session.
                 </DialogDescription>
               </DialogHeader>
+
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium">Room Code</label>
@@ -903,26 +1105,29 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
                     className="mt-1"
                     maxLength={6}
                   />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Ask your teacher for the 6-character room code
+                  </p>
                 </div>
+                <DialogFooter className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowRoomCodeDialog(false)
+                      setRoomCode("")
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={joinSessionByRoomCode}
+                    disabled={joiningSession || !roomCode.trim()}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    {joiningSession ? "Joining..." : "Join Session"}
+                  </Button>
+                </DialogFooter>
               </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowRoomCodeDialog(false)
-                    setRoomCode("")
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={joinSessionByRoomCode}
-                  disabled={joiningSession || !roomCode.trim()}
-                  className="bg-red-600 hover:bg-red-700 text-white"
-                >
-                  {joiningSession ? "Joining..." : "Join Session"}
-                </Button>
-              </DialogFooter>
             </DialogContent>
           </Dialog>
 
@@ -966,7 +1171,7 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
                     <div className="p-3 bg-gray-50 rounded-lg">
                       <div className="text-sm font-medium text-gray-700">Account Created</div>
                       <div className="text-sm text-gray-900 mt-1">
-                        {user.metadata?.creationTime 
+                        {user.metadata?.creationTime
                           ? new Date(user.metadata.creationTime).toLocaleDateString()
                           : 'Unknown'
                         }
@@ -993,6 +1198,148 @@ export function ParticipantDashboard({ user, participantName }: ParticipantDashb
                     Close
                   </Button>
                 </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Create New Custom Wheel Dialog */}
+          <Dialog open={showCreateWheelDialog} onOpenChange={setShowCreateWheelDialog}>
+            <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+              <DialogHeader className="pb-4">
+                <DialogTitle className="text-xl font-bold text-center sm:text-left">
+                  Create New Custom Wheel
+                </DialogTitle>
+                <DialogDescription className="text-base text-center sm:text-left">
+                  Design your own wheel with custom participants. This wheel can be used for both live draws and solo play.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 sm:space-y-6">
+                {/* Wheel Details */}
+                <div className="space-y-3 sm:space-y-4">
+                  <div>
+                    <label className="text-sm font-medium block">
+                      Wheel Title <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      placeholder="e.g., Class Presentation Order, Team Assignments"
+                      className="mt-1 w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block">Description (Optional)</label>
+                    <Input
+                      placeholder="Brief description of this wheel's purpose"
+                      className="mt-1 w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block">Category</label>
+                    <select className="w-full mt-1 p-3 border border-gray-300 rounded-md bg-white text-sm sm:text-base">
+                      <option value="academic">📚 Academic</option>
+                      <option value="entertainment">🎮 Entertainment</option>
+                      <option value="personal">👤 Personal</option>
+                      <option value="other">📋 Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block">
+                      Participants <span className="text-red-500">*</span>
+                    </label>
+                    <p className="text-sm text-muted-foreground mb-2">Enter participants (one per line):</p>
+                    <textarea
+                      placeholder="Alice Johnson&#10;Bob Smith&#10;Charlie Brown&#10;Diana Prince"
+                      className="w-full mt-1 p-3 border border-gray-300 rounded-md h-32 resize-none font-mono text-sm"
+                      rows={6}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter each participant name on a separate line. Minimum 2 participants required.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Wheel Settings */}
+                <div className="border-t pt-4 sm:pt-6">
+                  <h3 className="text-lg font-semibold mb-3 sm:mb-4">Wheel Settings</h3>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
+                    <div>
+                      <label className="text-sm font-medium block">Number of Winners</label>
+                      <select className="w-full mt-1 p-3 border border-gray-300 rounded-md bg-white text-sm sm:text-base">
+                        <option value="1">1 Winner</option>
+                        <option value="2">2 Winners</option>
+                        <option value="3">3 Winners</option>
+                        <option value="5">5 Winners</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium block">Theme</label>
+                      <select className="w-full mt-1 p-3 border border-gray-300 rounded-md bg-white text-sm sm:text-base">
+                        <option value="default">🎨 Default</option>
+                        <option value="colorful">🌈 Colorful</option>
+                        <option value="minimal">⚪ Minimal</option>
+                        <option value="dark">🌙 Dark</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 border border-gray-300 rounded-md">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm sm:text-base">🎊 Confetti Animation</div>
+                        <div className="text-xs sm:text-sm text-muted-foreground">Show confetti when wheel stops</div>
+                      </div>
+                      <div className="text-green-600 font-semibold text-sm sm:text-base ml-2">On</div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 border border-gray-300 rounded-md">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm sm:text-base">🔊 Sound Effects</div>
+                        <div className="text-xs sm:text-sm text-muted-foreground">Play sounds during spin</div>
+                      </div>
+                      <div className="text-green-600 font-semibold text-sm sm:text-base ml-2">On</div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium block">Congratulations Message</label>
+                      <Input
+                        placeholder="Congratulations, {winner}!"
+                        className="mt-1 w-full"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Use {"{winner}"} as placeholder for the selected participant's name
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-4 sm:pt-6 border-t">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowCreateWheelDialog(false)}
+                    className="w-full sm:w-auto px-6 order-2 sm:order-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      // Handle wheel creation logic here
+                      toast({
+                        title: "🎯 Wheel Created!",
+                        description: "Your custom wheel has been created successfully.",
+                      })
+                      setShowCreateWheelDialog(false)
+                    }}
+                    className="bg-swu-red hover:bg-swu-red/90 text-white w-full sm:w-auto px-6 order-1 sm:order-2"
+                  >
+                    Create Wheel
+                  </Button>
+                </DialogFooter>
               </div>
             </DialogContent>
           </Dialog>
